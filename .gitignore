@@ -1,0 +1,25 @@
+# Standard Maven/Gradle/Node build directories
+target/
+build/
+out/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.vite/
+
+# Local runtime & provisioned toolchain directories
+classes/
+vendor/
+data/
+
+# Runtime logs
+logs/
+*.log
+
+# Environment & IDE
+.env
+.env.local
+.idea/
+.vscode/
+*.iml
+.DS_Store

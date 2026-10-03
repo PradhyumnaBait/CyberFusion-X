@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.cyberfusionx</groupId>
+    <artifactId>cyberfusion-x-platform</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>CyberFusion X — AI-Powered Digital Forensics &amp; Fraud Reconstruction</name>
+    <description>Java 21 LTS + Jakarta Servlet 6.1 Digital Forensics, OCR, Entity Correlation, Incident Graph &amp; Cryptographic Integrity Platform</description>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <jakarta.servlet.version>6.1.0</jakarta.servlet.version>
+        <gson.version>2.13.2</gson.version>
+        <guava.version>33.5.0-jre</guava.version>
+        <commons.codec.version>1.20.0</commons.codec.version>
+        <commons.lang3.version>3.20.0</commons.lang3.version>
+        <slf4j.version>2.0.17</slf4j.version>
+        <logback.version>1.5.21</logback.version>
+        <jsoup.version>1.19.1</jsoup.version>
+        <junit.version>4.13.2</junit.version>
+    </properties>
+
+    <build>
+        <sourceDirectory>backend/src/main/java</sourceDirectory>
+        <testSourceDirectory>backend/src/test/java</testSourceDirectory>
+        <resources>
+            <resource>
+                <directory>backend/src/main/resources</directory>
+            </resource>
+        </resources>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>21</release>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <dependencies>
+        <!-- Jakarta Servlet 6.1 API -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <version>${jakarta.servlet.version}</version>
+        </dependency>
+
+        <!-- Google Gson for JSON Serialization -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>${gson.version}</version>
+        </dependency>
+
+        <!-- Google Guava (Graph, Hashing, Collections) -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>${guava.version}</version>
+        </dependency>
+
+        <!-- Apache Commons Codec & Lang3 -->
+        <dependency>
+            <groupId>commons-codec</groupId>
+            <artifactId>commons-codec</artifactId>
+            <version>${commons.codec.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>${commons.lang3.version}</version>
+        </dependency>
+
+        <!-- Jsoup for HTML/EML Evidence Parsing -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>${jsoup.version}</version>
+        </dependency>
+
+        <!-- SLF4J & Logback Structured Forensic Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback.version}</version>
+        </dependency>
+
+        <!-- JUnit & Hamcrest for Unit/Integration Testing -->
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
