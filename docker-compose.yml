@@ -1,0 +1,56 @@
+version: "3.9"
+
+services:
+  cyberfusion-postgres:
+    image: postgres:16-alpine
+    container_name: cyberfusion-postgres
+    environment:
+      POSTGRES_USER: forensics_admin
+      POSTGRES_PASSWORD: forensics_secret_password
+      POSTGRES_DB: cyberfusion_x
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/main/resources/db/migration:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forensics_admin -d cyberfusion_x"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  cyberfusion-minio:
+    image: minio/minio:latest
+    container_name: cyberfusion-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: cyberfusion_vault_key
+      MINIO_ROOT_PASSWORD: cyberfusion_vault_secret_key
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_vault_data:/data
+
+  cyberfusion-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cyberfusion-backend
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      HOST: "0.0.0.0"
+      DATA_DIR: "/app/data"
+      JWT_SECRET: "cyberfusion-x-enterprise-forensics-jwt-hmac-secret-2026"
+    volumes:
+      - app_vault_data:/app/data
+    depends_on:
+      - cyberfusion-postgres
+      - cyberfusion-minio
+
+volumes:
+  postgres_data:
+  minio_vault_data:
+  app_vault_data:

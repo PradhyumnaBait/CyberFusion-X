@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: cyberfusion-x-platform
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /api/v1/cases
+    envVars:
+      - key: PORT
+        value: "8080"
