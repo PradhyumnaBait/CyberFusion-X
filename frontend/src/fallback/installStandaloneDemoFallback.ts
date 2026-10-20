@@ -205,18 +205,29 @@ startxref
       return jsonResp(state.usersResponse);
     }
     if (path === '/api/v1/auth/login' && method === 'POST') {
-      const uname = bodyJson.username || 'arjun.verma';
+      const uname = (bodyJson.username || '').trim();
+      const pwd = (bodyJson.password || '').trim();
+      if (!uname || !pwd) {
+        return jsonResp({ error: 'Username and password are required.' }, 400);
+      }
       const users = state.usersResponse?.users || [];
-      const found =
-        users.find((u: any) => u.username === uname) ||
-        users[0] || {
-          id: 'usr-lead-01',
-          username: uname,
-          fullName: 'Cmdr. Arjun Verma (Lead Forensics)',
-          role: 'LEAD_INVESTIGATOR',
-          department: 'Financial Cybercrime & Mule Intelligence',
-          clearanceBadge: 'CFX-CLEARANCE-L5',
-        };
+      const found = users.find((u: any) => u.username === uname);
+      if (!found) {
+        return jsonResp({ error: 'Invalid investigator username or password' }, 401);
+      }
+      return jsonResp({
+        authenticated: true,
+        token: `demo-jwt-${found.username}-${Date.now()}`,
+        user: found,
+      });
+    }
+    if (path === '/api/v1/auth/switch-role' && method === 'POST') {
+      const uname = bodyJson.username;
+      const users = state.usersResponse?.users || [];
+      const found = users.find((u: any) => u.username === uname);
+      if (!found) {
+        return jsonResp({ error: `Investigator account not found: ${uname}` }, 404);
+      }
       return jsonResp({
         authenticated: true,
         token: `demo-jwt-${found.username}-${Date.now()}`,

@@ -63,3 +63,15 @@ npm run dev
 | `ReportServlet` | `GET /api/v1/reports/*` | Structured JSON report, `/pdf` (Signed PDF 1.7 binary), `/stix` (STIX 2.1 JSON), `/markdown` |
 | `SearchServlet` | `GET /api/v1/search?q=...` | Global `Cmd+K` search across cases, SHA-256/BLAKE3 hashes, entities, and OCR text |
 | `ForensicProgressSseServlet` | `GET /api/v1/stream/*` | `text/event-stream` real-time pipeline stage progress |
+
+---
+
+## 📐 Layout Integrity & Forensic UI Standard
+
+All investigative views in CyberFusion X must strictly adhere to layout integrity constraints:
+- **Zero Overflow**: No primary heading, metric tile, node label, hash, UPI identifier, wallet address, or button label may visibly escape its parent container.
+- **Defensive Sizing**: Always apply `min-w-0` to flexbox and grid children holding text or technical strings.
+- **Deliberate Truncation & Inspection**: Long identifiers (hashes, UPI IDs, cryptocurrency addresses) must truncate cleanly (`truncate` / `break-all`) while always preserving full-value access via native `title` tooltips, contextual inspectors, or copy actions.
+- **Hierarchy Over Density**: Avoid cramped metric strips with narrow fixed widths. Prioritize readable graph canvases, dedicated forensic tracer bars, and detailed inspectors.
+- **Dynamic Derivation**: Node counts, edge counts, and shortest-path hops must always be data-derived from active state, never hard-coded.
+
