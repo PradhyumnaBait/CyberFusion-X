@@ -1,3 +1,7 @@
+> **⚠ SUPERSEDED (Oct 2026):** This was the v1 officer-only plan. The product has been redesigned into
+> citizen + officer portals. The audit, keep/remove decisions and implemented slice plan live in
+> **`docs/TWO_PORTAL_REDESIGN_PLAN.md`**; current architecture and run instructions are in `README.md`.
+
 # 🧠 CyberFusion X — Implementation Plan (Java 21 + Jakarta Servlets + React)
 
 **Platform:** CyberFusion X — AI-Powered Digital Forensics & Fraud Reconstruction  

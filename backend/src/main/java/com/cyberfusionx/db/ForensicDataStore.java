@@ -4,6 +4,7 @@ import com.cyberfusionx.crypto.CryptographicHashService;
 import com.cyberfusionx.crypto.CryptographicHashService.DualHashResult;
 import com.cyberfusionx.forensics.AiForensicExtractorService;
 import com.cyberfusionx.forensics.AiForensicExtractorService.ExtractionBundle;
+import com.cyberfusionx.forensics.ImageForensicsService;
 import com.cyberfusionx.forensics.IncidentGraphService;
 import com.cyberfusionx.forensics.MetadataForensicsService;
 import com.cyberfusionx.forensics.MetadataForensicsService.MetadataAnalysisResult;
@@ -11,6 +12,7 @@ import com.cyberfusionx.forensics.OcrExtractionService;
 import com.cyberfusionx.forensics.OcrExtractionService.OcrResult;
 import com.cyberfusionx.forensics.RiskScoringService;
 import com.cyberfusionx.forensics.RiskScoringService.RiskEvaluation;
+import com.cyberfusionx.forensics.RiskScoringService.UrgencyEvaluation;
 import com.cyberfusionx.forensics.SampleCaseSeeder;
 import com.cyberfusionx.model.Models.*;
 import com.google.gson.Gson;
@@ -31,7 +33,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.security.SecureRandom;
+import java.time.temporal.ChronoUnit;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
@@ -58,7 +65,7 @@ public final class ForensicDataStore {
     private PersistentState state = new PersistentState();
 
     public static class PersistentState {
-        public int schemaVersion = 3;
+        public int schemaVersion = 4;
         public List<User> users = new ArrayList<>();
         public List<ForensicCase> cases = new ArrayList<>();
         public List<EvidenceItem> evidenceItems = new ArrayList<>();
@@ -67,6 +74,9 @@ public final class ForensicDataStore {
         public List<EntityRelationship> relationships = new ArrayList<>();
         public List<TimelineEvent> timelineEvents = new ArrayList<>();
         public List<ChainOfCustodyEntry> custodyLedger = new ArrayList<>();
+        public List<StatusUpdate> statusUpdates = new ArrayList<>();
+        public List<FreezeRequest> freezeRequests = new ArrayList<>();
+        public List<PoliceStation> stations = new ArrayList<>();
     }
 
     private ForensicDataStore() {
@@ -94,7 +104,7 @@ public final class ForensicDataStore {
                     String json = Files.readString(stateFile, StandardCharsets.UTF_8);
                     PersistentState loaded = GSON.fromJson(json, PersistentState.class);
                     boolean allFilesPresent = loaded != null
-                            && loaded.schemaVersion >= 3
+                            && loaded.schemaVersion >= 4
                             && loaded.evidenceItems != null
                             && !loaded.evidenceItems.isEmpty()
                             && loaded.evidenceItems.stream().allMatch(ev ->
@@ -111,8 +121,10 @@ public final class ForensicDataStore {
             }
 
             seedDefaultUsers();
+            seedStations();
             seedPrimaryOperationPhantomUpiCase();
             seedSecondaryBecWireInterceptCase();
+            seedCitizenDemoCases();
             saveStateUnlocked();
             LOG.info("Initialized CyberFusion X Forensic Store with {} cases, {} evidence items, {} entities.",
                     state.cases.size(), state.evidenceItems.size(), state.entities.size());
@@ -128,8 +140,10 @@ public final class ForensicDataStore {
         try {
             this.state = new PersistentState();
             seedDefaultUsers();
+            seedStations();
             seedPrimaryOperationPhantomUpiCase();
             seedSecondaryBecWireInterceptCase();
+            seedCitizenDemoCases();
             appendLedgerUnlocked("case-phantom-upi-01",
                     actorUsername != null ? actorUsername : "arjun.verma",
                     "LEAD_INVESTIGATOR",
@@ -237,7 +251,11 @@ public final class ForensicDataStore {
         c.status = "ANALYZING";
         c.severity = "CRITICAL";
         c.victimName = "Aarav Mehta (Apex Logistics Pvt Ltd)";
-        c.estimatedLossUsd = 18450.00;
+        c.amountLostPaise = 18450000L; // Rs. 1,84,500
+        c.origin = "OFFICER";
+        c.incidentAt = "2026-10-01T10:12:18Z";
+        c.reportedAt = c.createdAt;
+        c.district = "Mumbai";
         c.leadInvestigatorId = "usr-lead-01";
         c.leadInvestigatorName = "Cmdr. Arjun Verma (Lead Forensics)";
         c.createdAt = "2026-10-01T10:05:00Z";
@@ -245,7 +263,7 @@ public final class ForensicDataStore {
         c.summary = "Coordinated spear-phishing and instant payment fraud targeting corporate signatory Aarav Mehta. "
                 + "Initial SMS lure sent from burner VoIP +919820411892 directed the victim to an Evilginx reverse-proxy domain "
                 + "(https://secure-hdfc-kyc-update.top/auth-login) hosted on bulletproof IP 185.220.101.44. "
-                + "Harvested session tokens authorized two rapid UPI/IMPS transfers totaling $18,450.00 through Level-1 Mule VPA "
+                + "Harvested session tokens authorized two rapid UPI/IMPS transfers totaling Rs. 1,84,500 through Level-1 Mule VPA "
                 + "apex.verify.settlement@okaxis (Vikram Singh) and Level-2 account 918020048192831 before off-ramping into Tron USDT wallet "
                 + "TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE.";
         state.cases.add(c);
@@ -287,7 +305,7 @@ public final class ForensicDataStore {
                 "Timestamp: 2026-10-01T10:21:40Z",
                 "WhatsApp Encrypted Session — Impersonating Bank Desk",
                 "Message: Sir your OTP token is validated on https://secure-hdfc-kyc-update.top/auth-login",
-                "Initiate liquidity verification transfer of $4,850.00 to escrow VPA:",
+                "Initiate liquidity verification transfer of Rs. 48,500 to escrow VPA:",
                 "Beneficiary UPI: apex.verify.settlement@okaxis",
                 "Secondary Clearing Account: 918020048192831"
         };
@@ -316,7 +334,7 @@ public final class ForensicDataStore {
                 "Paid To UPI: apex.verify.settlement@okaxis",
                 "Linked Account: 918020048192831",
                 "Transaction ID: UTR627491830521",
-                "Amount Transferred: $4,850.00"
+                "Amount Transferred: Rs. 48,500"
         };
         Map<String, String> ev3Meta = new LinkedHashMap<>();
         ev3Meta.put("DeviceMake", "Android Virtual Framebuffer");
@@ -328,7 +346,7 @@ public final class ForensicDataStore {
         byte[] ev3Bytes = SampleCaseSeeder.renderForensicEvidencePng(
                 "BANK_RECEIPT",
                 "UPI / IMPS Transfer Receipt #UTR627491830521",
-                "Amount: $4,850.00 • Beneficiary: apex.verify.settlement@okaxis",
+                "Amount: Rs. 48,500 - Beneficiary: apex.verify.settlement@okaxis",
                 ev3Lines,
                 ev3Meta,
                 String.join("\n", ev3Lines)
@@ -344,7 +362,7 @@ public final class ForensicDataStore {
                 "Source UPI: apex.verify.settlement@okaxis",
                 "Layer-2 Mule UPI: fast.liquidity.hub@ybl",
                 "Settlement Reference: IMPS-88392019482",
-                "Amount Routed: $13,600.00",
+                "Amount Routed: Rs. 1,36,000",
                 "Crypto Off-Ramp Wallet: TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE",
                 "Operator Phone: +919876509911",
                 "C2 Proxy IP: 185.220.101.44"
@@ -379,14 +397,18 @@ public final class ForensicDataStore {
         c.status = "OPEN";
         c.severity = "HIGH";
         c.victimName = "Meera Deshmukh (CFO, Horizon BioTech)";
-        c.estimatedLossUsd = 64200.00;
+        c.amountLostPaise = 535000000L; // Rs. 53,50,000
+        c.origin = "OFFICER";
+        c.incidentAt = "2026-10-01T08:11:05Z";
+        c.reportedAt = c.createdAt;
+        c.district = "Mumbai";
         c.leadInvestigatorId = "usr-lead-01";
         c.leadInvestigatorName = "Cmdr. Arjun Verma (Lead Forensics)";
         c.createdAt = "2026-10-01T07:30:00Z";
         c.updatedAt = "2026-10-01T09:45:00Z";
         c.summary = "Business Email Compromise (BEC) utilizing lookalike supplier domain (billing@apex-global-supply.xyz) "
                 + "to inject a modified IBAN beneficiary account (GB29NWBK60161331926819) into an active vendor settlement thread, "
-                + "diverting $64,200.00 via SWIFT wire SWFT-774910239 to an offshore layering wallet 0x71C9656EC7ab88b098defB751B7401B5f6d8976F.";
+                + "diverting Rs. 53,50,000 via SWIFT wire SWFT-774910239 to an offshore layering wallet 0x71C9656EC7ab88b098defB751B7401B5f6d8976F.";
         state.cases.add(c);
 
         appendLedgerUnlocked(c.id, "arjun.verma", "LEAD_INVESTIGATOR", "CASE_INITIALIZED",
@@ -401,7 +423,7 @@ public final class ForensicDataStore {
                 "Origin Corporate Account: ACCT-4410-CORP-VICTIM",
                 "Updated Beneficiary IBAN: GB29NWBK60161331926819",
                 "SWIFT Wire Reference: SWFT-774910239",
-                "Amount Transferred: $64,200.00",
+                "Amount Transferred: Rs. 53,50,000",
                 "Off-Ramp Wallet: 0x71C9656EC7ab88b098defB751B7401B5f6d8976F",
                 "Relay IP: 91.219.236.174",
                 "Callback Phone: +447700900412"
@@ -512,8 +534,12 @@ public final class ForensicDataStore {
             item.exifMetadata.putAll(metaResult.exifMetadata());
             item.ocrRawText = ocrResult.rawText();
             item.ocrConfidence = ocrResult.averageConfidence();
+            item.ocrEngine = ocrResult.engine();
+            item.needsReview = ocrResult.needsReview();
+            item.phash = metaResult.detectedMimeType() != null && metaResult.detectedMimeType().startsWith("image/")
+                    ? ImageForensicsService.computeAHash(fileBytes) : null;
             item.boundingBoxes.addAll(ocrResult.boundingBoxes());
-            item.processingStage = "COMPLETED";
+            item.processingStage = item.needsReview ? "NEEDS_REVIEW" : "COMPLETED";
             item.timestampAnomaly = metaResult.timestampAnomaly();
             item.timestampAnomalyDetail = metaResult.timestampAnomalyDetail();
             item.uploadedBy = uploadedBy;
@@ -563,12 +589,16 @@ public final class ForensicDataStore {
         List<TimelineEvent> tl = state.timelineEvents.stream().filter(t -> t.caseId.equals(caseId)).toList();
 
         IncidentGraphService.enrichGraphMetrics(ents, rels);
-        RiskEvaluation eval = RiskScoringService.evaluateCaseRisk(evs, ents, rels, tl);
+        Map<String, Integer> cross = crossCaseCountsUnlocked(caseId);
+        RiskEvaluation eval = RiskScoringService.evaluateCaseRisk(evs, ents, rels, tl, cross);
 
         for (ForensicCase fc : state.cases) {
             if (fc.id.equals(caseId)) {
                 fc.riskScore = eval.compositeRiskScore();
                 fc.severity = eval.severityTier();
+                int maxCross = cross.values().stream().mapToInt(Integer::intValue).max().orElse(0);
+                UrgencyEvaluation urg = RiskScoringService.evaluateUrgency(fc, maxCross, evs.size(), ents.size());
+                fc.urgencyScore = urg.urgencyScore();
                 fc.updatedAt = Instant.now().toString();
                 break;
             }
@@ -856,7 +886,7 @@ public final class ForensicDataStore {
     }
 
     public ForensicCase createCase(String title, String incidentType, String victimName,
-                                   double estimatedLossUsd, String summary, User creator) {
+                                   long amountLostPaise, String summary, User creator) {
         lock.writeLock().lock();
         try {
             ForensicCase c = new ForensicCase();
@@ -868,7 +898,9 @@ public final class ForensicDataStore {
             c.severity = "MEDIUM";
             c.riskScore = 25;
             c.victimName = victimName != null ? victimName : "Corporate Investigation Subject";
-            c.estimatedLossUsd = estimatedLossUsd;
+            c.amountLostPaise = amountLostPaise;
+            c.origin = "OFFICER";
+            c.reportedAt = c.createdAt;
             c.summary = summary != null && !summary.isBlank()
                     ? summary
                     : "Investigation initialized in CyberFusion X. Upload screenshots, receipts, or IOCs to reconstruct the incident.";
@@ -1102,12 +1134,782 @@ public final class ForensicDataStore {
         }
     }
 
+    // =====================================================================
+    // Two-portal additions: stations, citizen drafts, cross-case, freeze
+    // =====================================================================
+
+    private void seedStations() {
+        String[][] data = {
+                {"st-mh-hq", "Maharashtra Cyber HQ, Mahape (Navi Mumbai)", "Thane", "MAHARASHTRA_CYBER_HQ"},
+                {"st-mumbai", "Mumbai Cyber Police Station, BKC", "Mumbai", "CYBER_PS"},
+                {"st-pune", "Pune Cyber Police Station, Shivajinagar", "Pune", "CYBER_PS"},
+                {"st-nagpur", "Nagpur Cyber Police Station", "Nagpur", "CYBER_PS"},
+                {"st-thane", "Thane Cyber Police Station", "Thane", "CYBER_PS"},
+                {"st-nashik", "Nashik Cyber Police Station", "Nashik", "CYBER_PS"},
+                {"st-csambhajinagar", "Chhatrapati Sambhajinagar Cyber Police Station", "Chhatrapati Sambhajinagar", "CYBER_PS"},
+        };
+        for (String[] row : data) {
+            PoliceStation st = new PoliceStation();
+            st.id = row[0]; st.name = row[1]; st.district = row[2]; st.type = row[3];
+            state.stations.add(st);
+        }
+    }
+
+    public List<PoliceStation> getStations() {
+        lock.readLock().lock();
+        try { return new ArrayList<>(state.stations); } finally { lock.readLock().unlock(); }
+    }
+
+    public String stationIdForDistrict(String district) {
+        lock.readLock().lock();
+        try {
+            return state.stations.stream()
+                    .filter(st -> district != null && st.district.equalsIgnoreCase(district))
+                    .map(st -> st.id).findFirst().orElse("st-mh-hq");
+        } finally { lock.readLock().unlock(); }
+    }
+
+    /** For each entity key of this case, how many OTHER cases contain the same entity. The fraud-ring index. */
+    public Map<String, Integer> crossCaseCountsUnlocked(String caseId) {
+        Map<String, Integer> out = new LinkedHashMap<>();
+        List<ExtractedEntity> mine = state.entities.stream().filter(e -> e.caseId.equals(caseId)).toList();
+        for (ExtractedEntity m : mine) {
+            String key = m.entityType + "::" + m.normalizedValue.toLowerCase(Locale.ROOT);
+            long others = state.entities.stream()
+                    .filter(e -> !e.caseId.equals(caseId))
+                    .filter(e -> e.entityType.equals(m.entityType) && e.normalizedValue.equalsIgnoreCase(m.normalizedValue))
+                    .map(e -> e.caseId).distinct().count();
+            out.put(key, (int) others);
+        }
+        return out;
+    }
+
+    /** Related complaints: shared entities grouped by the other case. Officer-facing (contains case refs). */
+    public List<Map<String, Object>> findRelatedCases(String caseId) {
+        lock.readLock().lock();
+        try {
+            List<ExtractedEntity> mine = state.entities.stream().filter(e -> e.caseId.equals(caseId)).toList();
+            Map<String, List<String>> sharedByCase = new LinkedHashMap<>();
+            for (ExtractedEntity other : state.entities) {
+                if (other.caseId.equals(caseId)) continue;
+                boolean shared = mine.stream().anyMatch(m -> m.entityType.equals(other.entityType)
+                        && m.normalizedValue.equalsIgnoreCase(other.normalizedValue));
+                if (shared) {
+                    sharedByCase.computeIfAbsent(other.caseId, k -> new ArrayList<>())
+                            .add(other.entityType + ": " + other.displayLabel);
+                }
+            }
+            List<Map<String, Object>> out = new ArrayList<>();
+            for (Map.Entry<String, List<String>> e : sharedByCase.entrySet()) {
+                ForensicCase oc = state.cases.stream().filter(c -> c.id.equals(e.getKey())).findFirst().orElse(null);
+                if (oc == null) continue;
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("caseId", oc.id);
+                row.put("complaintNo", oc.caseNumber);
+                row.put("title", oc.title);
+                row.put("status", oc.status);
+                row.put("amountLostPaise", oc.amountLostPaise);
+                row.put("sharedEntities", e.getValue().stream().distinct().toList());
+                out.add(row);
+            }
+            return out;
+        } finally { lock.readLock().unlock(); }
+    }
+
+    /** Case seal: SHA-256 over the sorted evidence hashes — one fingerprint for the whole complaint. */
+    public String computeCaseSeal(String caseId) {
+        lock.readLock().lock();
+        try {
+            String joined = state.evidenceItems.stream()
+                    .filter(e -> e.caseId.equals(caseId))
+                    .map(e -> e.sha256Hash).sorted().collect(Collectors.joining("|"));
+            return CryptographicHashService.sha256Hex(joined);
+        } finally { lock.readLock().unlock(); }
+    }
+
+    public boolean verifyCitizenToken(String caseId, String rawToken) {
+        if (rawToken == null || rawToken.isBlank()) return false;
+        lock.readLock().lock();
+        try {
+            ForensicCase c = state.cases.stream().filter(x -> x.id.equals(caseId)).findFirst().orElse(null);
+            return c != null && c.draftTokenHash != null
+                    && c.draftTokenHash.equals(CryptographicHashService.sha256Hex(rawToken));
+        } finally { lock.readLock().unlock(); }
+    }
+
+    public ForensicCase findCaseByComplaintNo(String complaintNo) {
+        lock.readLock().lock();
+        try {
+            return state.cases.stream()
+                    .filter(c -> c.caseNumber != null && c.caseNumber.equalsIgnoreCase(complaintNo))
+                    .findFirst().orElse(null);
+        } finally { lock.readLock().unlock(); }
+    }
+
+    /** Creates a citizen draft complaint. Returns {case, token} — token shown once, only its hash is stored. */
+    public Map<String, Object> createCitizenDraft(String incidentType, String district, String language) {
+        lock.writeLock().lock();
+        try {
+            ForensicCase c = new ForensicCase();
+            c.id = "case-" + UUID.randomUUID().toString().substring(0, 8);
+            c.caseNumber = "DRAFT-" + c.id.substring(5).toUpperCase(Locale.ROOT);
+            c.title = "Citizen complaint (draft)";
+            c.incidentType = incidentType != null && !incidentType.isBlank() ? incidentType : "OTHER";
+            c.status = "DRAFT";
+            c.severity = "MEDIUM";
+            c.origin = "CITIZEN";
+            c.district = district;
+            c.stationId = stationIdForDistrict(district);
+            c.language = language != null ? language : "en";
+            c.victimName = "Citizen complainant";
+            c.summary = "";
+            c.createdAt = Instant.now().toString();
+            c.updatedAt = c.createdAt;
+            c.leadInvestigatorId = "usr-lead-01";
+            c.leadInvestigatorName = "Unassigned";
+            byte[] raw = new byte[18];
+            new SecureRandom().nextBytes(raw);
+            String token = CryptographicHashService.bytesToHex(raw);
+            c.draftTokenHash = CryptographicHashService.sha256Hex(token);
+            state.cases.add(0, c);
+            saveStateUnlocked();
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("case", c);
+            out.put("token", token);
+            return out;
+        } finally { lock.writeLock().unlock(); }
+    }
+
+    /** Citizen confirm-step edits: what the citizen corrected/confirmed before submitting. */
+    public ForensicCase updateCitizenDetails(String caseId, String victimName, String contactMasked,
+                                              String district, String summary, long amountLostPaise, String incidentAt) {
+        lock.writeLock().lock();
+        try {
+            ForensicCase c = state.cases.stream().filter(x -> x.id.equals(caseId)).findFirst().orElse(null);
+            if (c == null) return null;
+            if (victimName != null && !victimName.isBlank()) c.victimName = victimName;
+            if (contactMasked != null && !contactMasked.isBlank()) c.citizenContactMasked = contactMasked;
+            if (district != null && !district.isBlank()) { c.district = district; c.stationId = stationIdForDistrict(district); }
+            if (summary != null) c.summary = summary;
+            if (amountLostPaise >= 0) c.amountLostPaise = amountLostPaise;
+            if (incidentAt != null && !incidentAt.isBlank()) c.incidentAt = incidentAt;
+            c.title = c.incidentType.replace('_', ' ') + " — " + c.victimName;
+            c.updatedAt = Instant.now().toString();
+            saveStateUnlocked();
+            return c;
+        } finally { lock.writeLock().unlock(); }
+    }
+
+    public ForensicCase submitCitizenComplaint(String caseId) {
+        lock.writeLock().lock();
+        try {
+            ForensicCase c = state.cases.stream().filter(x -> x.id.equals(caseId)).findFirst().orElse(null);
+            if (c == null) return null;
+            long seq = 100 + state.cases.stream().filter(x -> x.caseNumber != null && x.caseNumber.startsWith("CFX-MH-")).count() + 1;
+            c.caseNumber = String.format("CFX-MH-2026-%06d", seq);
+            c.status = "SUBMITTED";
+            c.reportedAt = Instant.now().toString();
+            c.updatedAt = c.reportedAt;
+            if (c.incidentAt == null) c.incidentAt = c.createdAt;
+            recalculateCaseIntelligenceUnlocked(caseId);
+            addStatusUpdateUnlocked(caseId, "RECEIVED",
+                    "Your complaint and evidence were received and digitally sealed. Keep your complaint number safe.");
+            appendLedgerUnlocked(caseId, "citizen-portal", "CITIZEN", "COMPLAINT_SUBMITTED",
+                    c.caseNumber, "Citizen submitted complaint via portal (district: " + c.district + ")", "127.0.0.1");
+            broadcastProgress(caseId, "NEW_COMPLAINT", "New complaint " + c.caseNumber + " submitted", 100);
+            saveStateUnlocked();
+            return c;
+        } finally { lock.writeLock().unlock(); }
+    }
+
+    private void addStatusUpdateUnlocked(String caseId, String status, String note) {
+        StatusUpdate su = new StatusUpdate();
+        su.id = "stu-" + UUID.randomUUID().toString().substring(0, 8);
+        su.caseId = caseId;
+        su.status = status;
+        su.note = note;
+        su.createdAt = Instant.now().toString();
+        state.statusUpdates.add(su);
+    }
+
+    public List<StatusUpdate> getStatusUpdates(String caseId) {
+        lock.readLock().lock();
+        try {
+            return state.statusUpdates.stream().filter(s -> s.caseId.equals(caseId))
+                    .sorted(Comparator.comparing(s -> s.createdAt)).toList();
+        } finally { lock.readLock().unlock(); }
+    }
+
+    public ForensicCase updateCaseWorkflow(String caseId, String newStatus, String assignedOfficerId, String actorUsername, String citizenNote) {
+        lock.writeLock().lock();
+        try {
+            ForensicCase c = state.cases.stream().filter(x -> x.id.equals(caseId)).findFirst().orElse(null);
+            if (c == null) return null;
+            if (assignedOfficerId != null && !assignedOfficerId.isBlank()) {
+                c.assignedOfficerId = assignedOfficerId;
+                User u = findUserById(assignedOfficerId);
+                if (u != null) { c.leadInvestigatorId = u.id; c.leadInvestigatorName = u.fullName; }
+            }
+            if (newStatus != null && !newStatus.isBlank()) {
+                c.status = newStatus;
+                String citizenStatus = switch (newStatus) {
+                    case "TRIAGED" -> "UNDER_REVIEW";
+                    case "INVESTIGATING" -> "INVESTIGATING";
+                    case "CLOSED" -> "CLOSED";
+                    case "FREEZE_SENT" -> "BANK_INTIMATED";
+                    default -> null;
+                };
+                if (citizenStatus != null) {
+                    addStatusUpdateUnlocked(caseId, citizenStatus,
+                            citizenNote != null && !citizenNote.isBlank() ? citizenNote
+                                    : "Your complaint status is now: " + citizenStatus.replace('_', ' '));
+                }
+            }
+            c.updatedAt = Instant.now().toString();
+            appendLedgerUnlocked(caseId, actorUsername, "OFFICER", "CASE_WORKFLOW_UPDATED",
+                    c.caseNumber, "Status=" + c.status + " Assigned=" + c.assignedOfficerId, "127.0.0.1");
+            saveStateUnlocked();
+            return c;
+        } finally { lock.writeLock().unlock(); }
+    }
+
+    public List<FreezeRequest> getFreezeRequestsForCase(String caseId) {
+        lock.readLock().lock();
+        try { return state.freezeRequests.stream().filter(f -> f.caseId.equals(caseId)).toList(); }
+        finally { lock.readLock().unlock(); }
+    }
+
+    /**
+     * Creates (idempotently) and "sends" a freeze intimation to the mock bank.
+     * In production this packet goes through I4C/CFCFRMS + bank nodal officers; here a
+     * simulator acknowledgement is recorded and clearly labelled as simulation everywhere.
+     */
+    public FreezeRequest createAndSendFreezeRequest(String caseId, String accountRef, String bankName,
+                                                    String ifsc, String utr, long amountPaise, String actorUsername) {
+        lock.writeLock().lock();
+        try {
+            String idem = CryptographicHashService.sha256Hex(caseId + "|" + accountRef + "|" + amountPaise).substring(0, 24);
+            for (FreezeRequest existing : state.freezeRequests) {
+                if (idem.equals(existing.idempotencyKey) && !"REJECTED".equals(existing.status)) {
+                    return existing; // double-click safe
+                }
+            }
+            ForensicCase c = state.cases.stream().filter(x -> x.id.equals(caseId)).findFirst().orElse(null);
+            if (c == null) return null;
+            FreezeRequest fr = new FreezeRequest();
+            fr.id = "frz-" + UUID.randomUUID().toString().substring(0, 8);
+            fr.caseId = caseId;
+            fr.bankName = bankName;
+            fr.accountRef = accountRef;
+            fr.ifsc = ifsc;
+            fr.utr = utr;
+            fr.amountPaise = amountPaise;
+            fr.idempotencyKey = idem;
+            fr.requestedBy = actorUsername;
+            fr.createdAt = Instant.now().toString();
+            fr.packetHash = CryptographicHashService.sha256Hex(
+                    c.caseNumber + "|" + accountRef + "|" + ifsc + "|" + utr + "|" + amountPaise + "|" + computeCaseSeal(caseId));
+            // --- Mock bank acknowledgement (simulation) ---
+            fr.status = "ACKNOWLEDGED";
+            fr.sentAt = Instant.now().toString();
+            fr.ackRef = "MOCKBANK-ACK-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
+            state.freezeRequests.add(fr);
+            c.status = "FREEZE_SENT";
+            addStatusUpdateUnlocked(caseId, "BANK_INTIMATED",
+                    "The officer has sent a hold/freeze intimation for the destination account to the bank (acknowledgement "
+                            + fr.ackRef + "). This does not guarantee recovery — the bank will act as per its process.");
+            appendLedgerUnlocked(caseId, actorUsername, "OFFICER", "FREEZE_PACKET_SENT_MOCK_ACK",
+                    accountRef, "Packet SHA-256=" + fr.packetHash + " ACK=" + fr.ackRef, "127.0.0.1");
+            saveStateUnlocked();
+            return fr;
+        } finally { lock.writeLock().unlock(); }
+    }
+
+    /** Duplicate-transaction guard: does this normalised txn id already exist (optionally outside a case)? */
+    public List<String> findCasesWithTxnId(String txnId, String excludeCaseId) {
+        lock.readLock().lock();
+        try {
+            return state.entities.stream()
+                    .filter(e -> "TRANSACTION_ID".equals(e.entityType))
+                    .filter(e -> e.normalizedValue.equalsIgnoreCase(txnId))
+                    .filter(e -> excludeCaseId == null || !e.caseId.equals(excludeCaseId))
+                    .map(e -> e.caseId).distinct().toList();
+        } finally { lock.readLock().unlock(); }
+    }
+
+    /** Near-duplicate screenshots by aHash (same look, maybe re-saved). */
+    public List<EvidenceItem> findSimilarImages(String phash, String excludeEvidenceId) {
+        lock.readLock().lock();
+        try {
+            if (phash == null) return List.of();
+            return state.evidenceItems.stream()
+                    .filter(e -> e.phash != null && !e.id.equals(excludeEvidenceId))
+                    .filter(e -> ImageForensicsService.hammingDistance(phash, e.phash) <= 6)
+                    .toList();
+        } finally { lock.readLock().unlock(); }
+    }
+
+    public EvidenceItem findEvidenceBySha256(String sha256) {
+        lock.readLock().lock();
+        try {
+            return state.evidenceItems.stream()
+                    .filter(e -> e.sha256Hash.equalsIgnoreCase(sha256)).findFirst().orElse(null);
+        } finally { lock.readLock().unlock(); }
+    }
+
+    public Map<String, Object> analyticsSummary() {
+        lock.readLock().lock();
+        try {
+            Map<String, Object> out = new LinkedHashMap<>();
+            List<ForensicCase> submitted = state.cases.stream().filter(c -> !"DRAFT".equals(c.status)).toList();
+            out.put("totalComplaints", submitted.size());
+            out.put("totalAmountAtRiskPaise", submitted.stream().mapToLong(c -> c.amountLostPaise).sum());
+            out.put("byScamType", submitted.stream().collect(Collectors.groupingBy(
+                    c -> c.incidentType != null ? c.incidentType : "OTHER", Collectors.counting())));
+            out.put("byDistrict", submitted.stream().filter(c -> c.district != null).collect(Collectors.groupingBy(
+                    c -> c.district, Collectors.counting())));
+            out.put("byStatus", submitted.stream().collect(Collectors.groupingBy(c -> c.status, Collectors.counting())));
+            out.put("freezeRequestsSent", state.freezeRequests.size());
+
+            // --- Extended officer analytics (all traceable to real records) ---
+            Map<String, Object> freeze = new LinkedHashMap<>();
+            freeze.put("sent", state.freezeRequests.size());
+            freeze.put("acknowledged", state.freezeRequests.stream().filter(f -> "ACKNOWLEDGED".equals(f.status)).count());
+            freeze.put("totalAmountPaise", state.freezeRequests.stream().mapToLong(f -> f.amountPaise).sum());
+            out.put("freeze", freeze);
+
+            Map<String, Object> processing = new LinkedHashMap<>();
+            processing.put("totalFiles", state.evidenceItems.size());
+            processing.put("byEngine", state.evidenceItems.stream().collect(Collectors.groupingBy(
+                    e -> e.ocrEngine != null ? e.ocrEngine : "UNKNOWN", Collectors.counting())));
+            processing.put("needsReview", state.evidenceItems.stream().filter(e -> e.needsReview).count());
+            processing.put("intact", state.evidenceItems.stream().filter(e -> "VERIFIED_INTACT".equals(e.integrityStatus)).count());
+            processing.put("tampered", state.evidenceItems.stream().filter(e -> "TAMPER_DETECTED".equals(e.integrityStatus)).count());
+            processing.put("metadataAnomalies", state.evidenceItems.stream().filter(e -> e.timestampAnomaly).count());
+            processing.put("totalEntities", state.entities.size());
+            processing.put("totalRelationships", state.relationships.size());
+            processing.put("totalTimelineEvents", state.timelineEvents.size());
+            processing.put("entitiesByType", state.entities.stream().collect(Collectors.groupingBy(
+                    e -> e.entityType, Collectors.counting())));
+            processing.put("avgOcrConfidence", state.evidenceItems.isEmpty() ? 0
+                    : Math.round(state.evidenceItems.stream().mapToDouble(e -> e.ocrConfidence).average().orElse(0) * 1000.0) / 1000.0);
+            out.put("evidenceProcessing", processing);
+
+            out.put("amountByScamType", submitted.stream().collect(Collectors.groupingBy(
+                    c -> c.incidentType != null ? c.incidentType : "OTHER",
+                    Collectors.summingLong(c -> c.amountLostPaise))));
+            out.put("complaintsByDay", submitted.stream()
+                    .filter(c -> c.reportedAt != null && c.reportedAt.length() >= 10)
+                    .collect(Collectors.groupingBy(c -> c.reportedAt.substring(0, 10), Collectors.counting())));
+            out.put("unassigned", submitted.stream()
+                    .filter(c -> c.assignedOfficerId == null && !"CLOSED".equals(c.status)).count());
+            out.put("avgRiskScore", submitted.isEmpty() ? 0
+                    : Math.round(submitted.stream().mapToInt(c -> c.riskScore).average().orElse(0) * 10.0) / 10.0);
+            out.put("avgUrgencyScore", submitted.isEmpty() ? 0
+                    : Math.round(submitted.stream().mapToInt(c -> c.urgencyScore).average().orElse(0) * 10.0) / 10.0);
+            out.put("citizenOriginCount", submitted.stream().filter(c -> "CITIZEN".equals(c.origin)).count());
+            out.put("custodyLedger", verifyEntireAuditLedger());
+
+            // Top entities overall (most connected first — graph centrality already computed).
+            out.put("topEntities", state.entities.stream()
+                    .sorted(Comparator.comparingDouble((ExtractedEntity e) -> e.pagerankScore).reversed())
+                    .limit(8)
+                    .map(e -> {
+                        Map<String, Object> m = new LinkedHashMap<>();
+                        m.put("label", e.displayLabel);
+                        m.put("type", e.entityType);
+                        m.put("caseId", e.caseId);
+                        m.put("riskLevel", e.riskLevel);
+                        m.put("evidenceCount", e.evidenceIds.size());
+                        return m;
+                    }).toList());
+
+            // Repeat destinations leaderboard (from the same entity index as ring detection).
+            Map<String, Long> destCounts = state.entities.stream()
+                    .filter(e -> e.entityType.equals("UPI_ID") || e.entityType.equals("BANK_ACCOUNT") || e.entityType.equals("PHONE"))
+                    .collect(Collectors.groupingBy(e -> e.entityType + ": " + e.displayLabel, Collectors.counting()));
+            out.put("repeatDestinations", destCounts.entrySet().stream()
+                    .filter(e -> e.getValue() > 1)
+                    .sorted(Map.Entry.<String, Long>comparingByValue().reversed()).limit(10)
+                    .map(e -> Map.of("destination", e.getKey(), "complaints", e.getValue())).toList());
+            return out;
+        } finally { lock.readLock().unlock(); }
+    }
+
+    // ---------------------------------------------------------------------
+    // Case process flow & activity (officer-facing "how this complaint moved")
+    // ---------------------------------------------------------------------
+
+    /**
+     * The full processing pipeline of one case as stages with honest states,
+     * derived from records that actually exist: every DONE must be provable
+     * (hashes present, entities counted, freeze ACK reference, workflow rows).
+     * Nothing here is simulated progress — it is a view over the real state.
+     */
+    public Map<String, Object> casePipeline(String caseId) {
+        lock.readLock().lock();
+        try {
+            ForensicCase c = state.cases.stream().filter(x -> x.id.equals(caseId)).findFirst().orElse(null);
+            if (c == null) throw new IllegalArgumentException("Case not found: " + caseId);
+            List<EvidenceItem> evs = state.evidenceItems.stream().filter(e -> e.caseId.equals(caseId)).toList();
+            List<ExtractedEntity> ents = state.entities.stream().filter(e -> e.caseId.equals(caseId)).toList();
+            List<EntityRelationship> rels = state.relationships.stream().filter(r -> r.caseId.equals(caseId)).toList();
+            List<TimelineEvent> tl = state.timelineEvents.stream().filter(t -> t.caseId.equals(caseId)).toList();
+            List<FreezeRequest> freezes = state.freezeRequests.stream().filter(f -> f.caseId.equals(caseId)).toList();
+            List<StatusUpdate> workflow = statusUpdatesForCaseUnlocked(caseId);
+            Map<String, Integer> cross = crossCaseCountsUnlocked(caseId);
+            long crossMatched = cross.values().stream().filter(v -> v > 0).count();
+            Map<String, Object> risk = caseRiskAssessment(caseId);
+
+            List<Map<String, Object>> stages = new ArrayList<>();
+            boolean submitted = !"DRAFT".equals(c.status);
+            boolean reviewed = workflow.stream().anyMatch(u -> "UNDER_REVIEW".equals(u.status))
+                    || Set.of("OPEN", "UNDER_REVIEW", "INVESTIGATING", "CLOSED").contains(c.status);
+            boolean investigating = Set.of("INVESTIGATING", "CLOSED").contains(c.status);
+            boolean closed = "CLOSED".equals(c.status);
+
+            stages.add(stage("COMPLAINT_RECEIVED", "Complaint received",
+                    "DONE", c.reportedAt != null ? c.reportedAt : c.createdAt,
+                    ("CITIZEN".equals(c.origin) ? "Filed by citizen online" : "Recorded by officer")
+                            + " · Complaint " + c.caseNumber));
+            stages.add(stage("EVIDENCE_SEALED", "Evidence sealed with hash",
+                    evs.isEmpty() ? "PENDING" : "DONE",
+                    evs.stream().map(e -> e.uploadedAt).filter(Objects::nonNull).max(String::compareTo).orElse(null),
+                    evs.size() + " file(s) · SHA-256 + BLAKE3 recorded at receipt"));
+            long readable = evs.stream().filter(e -> e.ocrRawText != null && !e.ocrRawText.isBlank()).count();
+            long review = evs.stream().filter(e -> e.needsReview).count();
+            stages.add(stage("TEXT_READ", "Text read (OCR / embedded text)",
+                    evs.isEmpty() ? "PENDING" : "DONE",
+                    evs.stream().map(e -> e.uploadedAt).filter(Objects::nonNull).max(String::compareTo).orElse(null),
+                    readable + " of " + evs.size() + " file(s) readable"
+                            + (review > 0 ? " · " + review + " flagged 'check manually' (honest engine reporting)" : "")));
+            stages.add(stage("ENTITIES_EXTRACTED", "Details detected automatically",
+                    ents.isEmpty() ? "PENDING" : "DONE",
+                    ents.stream().map(e -> e.firstSeenAt).filter(Objects::nonNull).max(String::compareTo).orElse(null),
+                    ents.size() + " item(s): " + countByLabel(ents)));
+            stages.add(stage("CROSS_CASE", "Checked against other complaints",
+                    ents.isEmpty() ? "PENDING" : "DONE", c.updatedAt,
+                    crossMatched > 0
+                            ? crossMatched + " item(s) also appear in other complaints — possible repeat operation"
+                            : "No shared phone / UPI / account / link with other complaints yet"));
+            stages.add(stage("TIMELINE_GRAPH", "Timeline & connections built",
+                    (tl.isEmpty() && rels.isEmpty()) ? "PENDING" : "DONE", c.updatedAt,
+                    tl.size() + " timeline event(s) · " + rels.size() + " relationship(s)"));
+            stages.add(stage("SCORED", "Risk & urgency scored",
+                    submitted ? "DONE" : "PENDING", c.updatedAt,
+                    "Risk " + c.riskScore + " · Urgency " + c.urgencyScore
+                            + " — every point traceable to a measured signal (see Action Card)"));
+            stages.add(stage("OFFICER_REVIEW", "Officer review",
+                    reviewed ? "DONE" : (submitted ? "CURRENT" : "PENDING"),
+                    workflow.stream().filter(u -> "UNDER_REVIEW".equals(u.status)).map(u -> u.createdAt)
+                            .findFirst().orElse(null),
+                    c.assignedOfficerId != null ? "Assigned to an officer" : "Waiting in the triage queue"));
+            boolean freezeAck = freezes.stream().anyMatch(f -> "ACKNOWLEDGED".equals(f.status));
+            stages.add(stage("FREEZE_PACKET", "Bank freeze packet (simulation)",
+                    freezeAck ? "DONE" : (freezes.isEmpty() ? "PENDING" : "CURRENT"),
+                    freezes.stream().map(f -> f.sentAt != null ? f.sentAt : f.createdAt)
+                            .filter(Objects::nonNull).max(String::compareTo).orElse(null),
+                    freezes.isEmpty()
+                            ? "Not sent yet — the officer sends it from the Action Card"
+                            : freezes.stream().map(f -> f.bankName + ": " + f.status
+                                    + (f.ackRef != null ? " (" + f.ackRef + ")" : "")).collect(Collectors.joining("; "))));
+            stages.add(stage("INVESTIGATION", "Investigation",
+                    closed ? "DONE" : (investigating ? "CURRENT" : "PENDING"),
+                    workflow.stream().filter(u -> "INVESTIGATING".equals(u.status)).map(u -> u.createdAt)
+                            .findFirst().orElse(null),
+                    investigating ? "Under active investigation" : "Starts after review"));
+            stages.add(stage("REPORT_CLOSED", "Report & closure",
+                    closed ? "DONE" : "PENDING",
+                    workflow.stream().filter(u -> "CLOSED".equals(u.status)).map(u -> u.createdAt)
+                            .findFirst().orElse(null),
+                    "Court-ready report + BSA §63 certificate draft in the Report tab"));
+
+            List<Map<String, Object>> evidenceProcessing = new ArrayList<>();
+            for (EvidenceItem e : evs) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("evidenceId", e.id);
+                m.put("code", e.evidenceCode);
+                m.put("filename", e.originalFilename);
+                m.put("type", e.evidenceCategory);
+                m.put("receivedAt", e.uploadedAt);
+                m.put("processingStage", e.processingStage);
+                m.put("engine", e.ocrEngine);
+                m.put("confidence", e.ocrConfidence);
+                m.put("needsReview", e.needsReview);
+                m.put("textChars", e.ocrRawText != null ? e.ocrRawText.length() : 0);
+                m.put("integrity", e.integrityStatus);
+                m.put("lastVerifiedAt", e.lastVerifiedAt);
+                m.put("metadataAnomaly", e.timestampAnomaly);
+                m.put("phash", e.phash);
+                m.put("entityCount", ents.stream().filter(x -> x.evidenceIds.contains(e.id)).count());
+                evidenceProcessing.add(m);
+            }
+
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("caseId", c.id);
+            out.put("caseNumber", c.caseNumber);
+            out.put("complaintNumber", c.caseNumber);
+            out.put("status", c.status);
+            out.put("stages", stages);
+            out.put("evidenceProcessing", evidenceProcessing);
+            out.put("riskFactors", risk.get("riskFactors"));
+            out.put("urgencyReasons", risk.get("urgencyReasons"));
+            out.put("workflow", workflow.stream().map(this::statusUpdateMap).toList());
+            return out;
+        } finally { lock.readLock().unlock(); }
+    }
+
+    private List<StatusUpdate> statusUpdatesForCaseUnlocked(String caseId) {
+        return state.statusUpdates.stream().filter(s -> s.caseId.equals(caseId))
+                .sorted(Comparator.comparing(s -> s.createdAt != null ? s.createdAt : "")).toList();
+    }
+
+    private Map<String, Object> statusUpdateMap(StatusUpdate u) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", u.id);
+        m.put("status", u.status);
+        m.put("note", u.note);
+        m.put("createdAt", u.createdAt);
+        return m;
+    }
+
+    /** Live risk + urgency derivation for display (same functions that set the stored scores). */
+    private Map<String, Object> caseRiskAssessment(String caseId) {
+        ForensicCase c = state.cases.stream().filter(x -> x.id.equals(caseId)).findFirst().orElse(null);
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (c == null) return out;
+        List<EvidenceItem> evs = state.evidenceItems.stream().filter(e -> e.caseId.equals(caseId)).toList();
+        List<ExtractedEntity> ents = state.entities.stream().filter(e -> e.caseId.equals(caseId)).toList();
+        List<EntityRelationship> rels = state.relationships.stream().filter(r -> r.caseId.equals(caseId)).toList();
+        List<TimelineEvent> tl = state.timelineEvents.stream().filter(t -> t.caseId.equals(caseId)).toList();
+        Map<String, Integer> cross = crossCaseCountsUnlocked(caseId);
+        RiskEvaluation risk = RiskScoringService.evaluateCaseRisk(evs, ents, rels, tl, cross);
+        int maxCross = cross.values().stream().mapToInt(Integer::intValue).max().orElse(0);
+        UrgencyEvaluation urg = RiskScoringService.evaluateUrgency(c, maxCross, evs.size(), ents.size());
+        out.put("riskFactors", risk.indicators().stream().map(i -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("title", i.title);
+            m.put("description", i.description);
+            m.put("severity", i.severity);
+            m.put("scoreImpact", i.scoreImpact);
+            m.put("category", i.category);
+            return m;
+        }).toList());
+        out.put("urgencyReasons", urg.reasons());
+        return out;
+    }
+
+    private static Map<String, Object> stage(String id, String title, String state, String at, String detail) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", id);
+        m.put("title", title);
+        m.put("state", state); // DONE | CURRENT | PENDING
+        m.put("at", at);
+        m.put("detail", detail);
+        return m;
+    }
+
+    private static String countByLabel(List<ExtractedEntity> ents) {
+        Map<String, Long> counts = ents.stream().collect(Collectors.groupingBy(e -> e.entityType, Collectors.counting()));
+        if (counts.isEmpty()) return "none yet";
+        return counts.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .map(e -> humanEntityType(e.getKey()) + " ×" + e.getValue())
+                .collect(Collectors.joining(", "));
+    }
+
+    private static String humanEntityType(String type) {
+        return switch (type) {
+            case "PHONE" -> "phone numbers";
+            case "UPI_ID" -> "UPI IDs";
+            case "BANK_ACCOUNT" -> "bank accounts";
+            case "IFSC" -> "IFSC codes";
+            case "UTR" -> "UTR references";
+            case "URL" -> "links";
+            case "EMAIL" -> "emails";
+            case "AMOUNT" -> "amounts";
+            case "WALLET_ADDRESS" -> "wallets";
+            case "DEVICE" -> "devices";
+            default -> type.toLowerCase(Locale.ROOT).replace('_', ' ');
+        };
+    }
+
+    /** Merged, newest-first activity for one case: workflow + custody ledger + freeze + uploads. */
+    public List<Map<String, Object>> caseActivity(String caseId) {
+        lock.readLock().lock();
+        try {
+            List<Map<String, Object>> out = new ArrayList<>();
+            for (StatusUpdate u : statusUpdatesForCaseUnlocked(caseId)) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("kind", "WORKFLOW");
+                m.put("at", u.createdAt);
+                m.put("title", u.status.replace('_', ' '));
+                m.put("detail", u.note);
+                out.add(m);
+            }
+            for (ChainOfCustodyEntry r : state.custodyLedger.stream().filter(r -> caseId.equals(r.caseId)).toList()) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("kind", "CUSTODY");
+                m.put("at", r.timestamp);
+                m.put("title", r.actionType != null ? r.actionType.replace('_', ' ') : "Custody event");
+                m.put("detail", (r.actorUsername != null ? "by " + r.actorUsername + " · " : "") + (r.details != null ? r.details : ""));
+                out.add(m);
+            }
+            for (FreezeRequest f : state.freezeRequests.stream().filter(f -> f.caseId.equals(caseId)).toList()) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("kind", "FREEZE");
+                m.put("at", f.sentAt != null ? f.sentAt : f.createdAt);
+                m.put("title", "Freeze packet " + f.status);
+                m.put("detail", f.bankName + " · " + f.accountRef + (f.ackRef != null ? " · ACK " + f.ackRef : ""));
+                out.add(m);
+            }
+            for (EvidenceItem e : state.evidenceItems.stream().filter(e -> e.caseId.equals(caseId)).toList()) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("kind", "EVIDENCE");
+                m.put("at", e.uploadedAt);
+                m.put("title", "Evidence added: " + e.evidenceCode);
+                m.put("detail", e.originalFilename + " · sealed SHA-256 "
+                        + (e.sha256Hash != null ? e.sha256Hash.substring(0, Math.min(16, e.sha256Hash.length())) + "…" : ""));
+                out.add(m);
+            }
+            out.sort(Comparator.comparing(m -> String.valueOf(m.getOrDefault("at", "")), Comparator.reverseOrder()));
+            return out;
+        } finally { lock.readLock().unlock(); }
+    }
+
+    /** Three citizen-origin demo complaints sharing entities with each other / the officer case. */
+    private void seedCitizenDemoCases() {
+        // --- A: UPI KYC scam, Pune, 45 minutes ago (live golden-hour demo) ---
+        Instant incidentA = Instant.now().minus(45, ChronoUnit.MINUTES);
+        ForensicCase a = new ForensicCase();
+        a.id = "case-citizen-upi-03";
+        a.caseNumber = "CFX-MH-2026-000101";
+        a.title = "UPI PAYMENT FRAUD — Sneha Patel";
+        a.incidentType = "UPI_PAYMENT_FRAUD";
+        a.status = "SUBMITTED";
+        a.origin = "CITIZEN";
+        a.victimName = "Sneha Patel";
+        a.citizenContactMasked = "+91 98XXX XX210";
+        a.district = "Pune";
+        a.stationId = "st-pune";
+        a.language = "en";
+        a.amountLostPaise = 2450000L; // Rs. 24,500
+        a.incidentAt = incidentA.toString();
+        a.reportedAt = Instant.now().minus(5, ChronoUnit.MINUTES).toString();
+        a.createdAt = a.reportedAt;
+        a.updatedAt = a.reportedAt;
+        a.summary = "Citizen received a WhatsApp message impersonating her bank's KYC desk and paid Rs. 24,500 "
+                + "to UPI ID apex.verify.settlement@okaxis. DEMO DATA — all persons and identifiers are fictional.";
+        a.leadInvestigatorId = "usr-lead-01";
+        a.leadInvestigatorName = "Unassigned";
+        state.cases.add(a);
+        addStatusUpdateUnlocked(a.id, "RECEIVED", "Your complaint and evidence were received and digitally sealed.");
+
+        String[] aChat = {
+                "Sender: +919820411892",
+                "Victim: Sneha Patel",
+                "Timestamp: " + incidentA,
+                "URGENT: Your bank account will be frozen today. Complete KYC now:",
+                "https://secure-hdfc-kyc-update.top/auth-login",
+                "Pay verification amount to UPI: apex.verify.settlement@okaxis",
+        };
+        byte[] aChatBytes = SampleCaseSeeder.renderForensicEvidencePng("WHATSAPP_CHAT",
+                "WhatsApp KYC Scam Chat (DEMO)", "Citizen evidence - CFX-MH-2026-000101",
+                aChat, Map.of("Software", "WhatsApp Android"), String.join("\n", aChat));
+        ingestEvidenceInternal(a.id, "EVD-001", "citizen_whatsapp_chat.png", "CHAT_LOG", aChatBytes, "citizen-portal", a.reportedAt);
+
+        String[] aReceipt = {
+                "UPI PAYMENT SUCCESSFUL",
+                "Timestamp: " + incidentA.plus(9, ChronoUnit.MINUTES),
+                "From: Sneha Patel",
+                "Paid To UPI: apex.verify.settlement@okaxis",
+                "Beneficiary Account: 918020048192831 (IFSC: UTIB0001842)",
+                "UPI Ref No: 427188390214",
+                "Amount Transferred: Rs. 24,500",
+        };
+        byte[] aReceiptBytes = SampleCaseSeeder.renderForensicEvidencePng("BANK_RECEIPT",
+                "UPI Receipt Rs. 24,500 (DEMO)", "Citizen evidence - CFX-MH-2026-000101",
+                aReceipt, Map.of("Software", "UPI App Screenshot"), String.join("\n", aReceipt));
+        ingestEvidenceInternal(a.id, "EVD-002", "citizen_upi_receipt.png", "TRANSACTION_RECEIPT", aReceiptBytes, "citizen-portal", a.reportedAt);
+        recalculateCaseIntelligenceUnlocked(a.id);
+
+        // --- B: Fake-job scam, Nagpur, yesterday. SAME destination UPI -> fraud-ring signal. ---
+        Instant incidentB = Instant.now().minus(26, ChronoUnit.HOURS);
+        ForensicCase b = new ForensicCase();
+        b.id = "case-citizen-job-04";
+        b.caseNumber = "CFX-MH-2026-000102";
+        b.title = "FAKE JOB INVESTMENT — Rohit Sharma";
+        b.incidentType = "FAKE_JOB_INVESTMENT";
+        b.status = "TRIAGED";
+        b.origin = "CITIZEN";
+        b.victimName = "Rohit Sharma";
+        b.citizenContactMasked = "+91 97XXX XX441";
+        b.district = "Nagpur";
+        b.stationId = "st-nagpur";
+        b.language = "en";
+        b.amountLostPaise = 999900L; // Rs. 9,999
+        b.incidentAt = incidentB.toString();
+        b.reportedAt = Instant.now().minus(20, ChronoUnit.HOURS).toString();
+        b.createdAt = b.reportedAt;
+        b.updatedAt = b.reportedAt;
+        b.summary = "Citizen was added to a Telegram 'work from home' group and asked to pay a registration fee "
+                + "of Rs. 9,999 to the same UPI ID reported in other complaints. DEMO DATA.";
+        b.leadInvestigatorId = "usr-lead-01";
+        b.leadInvestigatorName = "Unassigned";
+        state.cases.add(b);
+        addStatusUpdateUnlocked(b.id, "RECEIVED", "Your complaint and evidence were received and digitally sealed.");
+        addStatusUpdateUnlocked(b.id, "UNDER_REVIEW", "An officer has started reviewing your complaint.");
+
+        String bText = "Telegram job group message (pasted by citizen)\n"
+                + "Timestamp: " + incidentB + "\n"
+                + "Contact: +919820411892\n"
+                + "Work from home, earn Rs. 5,000 per day. Pay registration fee Rs. 9,999 to UPI: apex.verify.settlement@okaxis\n"
+                + "UPI Ref No: 427188441902";
+        ingestEvidenceInternal(b.id, "EVD-001", "pasted_telegram_message.txt", "CHAT_LOG",
+                bText.getBytes(java.nio.charset.StandardCharsets.UTF_8), "citizen-portal", b.reportedAt);
+        recalculateCaseIntelligenceUnlocked(b.id);
+
+        // --- C: Harassment/threats, Mumbai, no money lost. Vulnerability-weighted urgency. ---
+        Instant incidentC = Instant.now().minus(2, ChronoUnit.HOURS);
+        ForensicCase c = new ForensicCase();
+        c.id = "case-citizen-threat-05";
+        c.caseNumber = "CFX-MH-2026-000103";
+        c.title = "HARASSMENT THREATS — Priya Nair Singh";
+        c.incidentType = "HARASSMENT_THREATS";
+        c.status = "SUBMITTED";
+        c.origin = "CITIZEN";
+        c.victimName = "Priya Nair Singh";
+        c.citizenContactMasked = "+91 99XXX XX077";
+        c.district = "Mumbai";
+        c.stationId = "st-mumbai";
+        c.language = "en";
+        c.amountLostPaise = 0L;
+        c.incidentAt = incidentC.toString();
+        c.reportedAt = Instant.now().minus(30, ChronoUnit.MINUTES).toString();
+        c.createdAt = c.reportedAt;
+        c.updatedAt = c.reportedAt;
+        c.summary = "Citizen reports repeated threatening calls and messages demanding money, claiming to be "
+                + "from a courier/customs office. No payment made. DEMO DATA.";
+        c.leadInvestigatorId = "usr-lead-01";
+        c.leadInvestigatorName = "Unassigned";
+        state.cases.add(c);
+        addStatusUpdateUnlocked(c.id, "RECEIVED", "Your complaint and evidence were received and digitally sealed.");
+
+        String cText = "Threatening SMS (pasted by citizen)\n"
+                + "Timestamp: " + incidentC + "\n"
+                + "Sender: +919876509911\n"
+                + "Your parcel has been seized by customs. Pay immediately or police will arrest you. Do not tell anyone.";
+        ingestEvidenceInternal(c.id, "EVD-001", "pasted_threat_sms.txt", "CHAT_LOG",
+                cText.getBytes(java.nio.charset.StandardCharsets.UTF_8), "citizen-portal", c.reportedAt);
+        recalculateCaseIntelligenceUnlocked(c.id);
+    }
+
     private Map<String, Object> buildCaseSummaryMapUnlocked(ForensicCase c) {
         List<EvidenceItem> evs = state.evidenceItems.stream().filter(e -> e.caseId.equals(c.id)).toList();
         List<ExtractedEntity> ents = state.entities.stream().filter(e -> e.caseId.equals(c.id)).toList();
         List<EntityRelationship> rels = state.relationships.stream().filter(r -> r.caseId.equals(c.id)).toList();
         List<TimelineEvent> tl = state.timelineEvents.stream().filter(t -> t.caseId.equals(c.id)).toList();
-        RiskEvaluation riskEval = RiskScoringService.evaluateCaseRisk(evs, ents, rels, tl);
+        RiskEvaluation riskEval = RiskScoringService.evaluateCaseRisk(evs, ents, rels, tl, crossCaseCountsUnlocked(c.id));
 
         long intactCount = evs.stream().filter(e -> "VERIFIED_INTACT".equals(e.integrityStatus)).count();
         long tamperedCount = evs.stream().filter(e -> "TAMPER_DETECTED".equals(e.integrityStatus)).count();
@@ -1123,7 +1925,23 @@ public final class ForensicDataStore {
         map.put("riskScore", c.riskScore);
         map.put("summary", c.summary);
         map.put("victimName", c.victimName);
-        map.put("estimatedLossUsd", c.estimatedLossUsd);
+        map.put("amountLostPaise", c.amountLostPaise);
+        map.put("complaintNo", c.caseNumber);
+        map.put("origin", c.origin);
+        map.put("district", c.district);
+        map.put("stationId", c.stationId);
+        map.put("citizenContactMasked", c.citizenContactMasked);
+        map.put("incidentAt", c.incidentAt);
+        map.put("reportedAt", c.reportedAt);
+        map.put("urgencyScore", c.urgencyScore);
+        map.put("assignedOfficerId", c.assignedOfficerId);
+        map.put("crossCaseHitCount", (int) state.entities.stream()
+                .filter(e -> !e.caseId.equals(c.id))
+                .filter(other -> ents.stream().anyMatch(mine ->
+                        mine.entityType.equals(other.entityType)
+                                && mine.normalizedValue.equalsIgnoreCase(other.normalizedValue)))
+                .map(e -> e.caseId).distinct().count());
+        map.put("freezeRequestCount", state.freezeRequests.stream().filter(f -> f.caseId.equals(c.id)).count());
         map.put("leadInvestigatorId", c.leadInvestigatorId);
         map.put("leadInvestigatorName", c.leadInvestigatorName);
         map.put("createdAt", c.createdAt);

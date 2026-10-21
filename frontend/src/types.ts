@@ -32,7 +32,18 @@ export interface ForensicCaseSummary {
   riskScore: number;
   summary: string;
   victimName: string;
-  estimatedLossUsd: number;
+  amountLostPaise: number;
+  complaintNo?: string;
+  origin?: string;
+  district?: string;
+  stationId?: string;
+  citizenContactMasked?: string;
+  incidentAt?: string;
+  reportedAt?: string;
+  urgencyScore?: number;
+  assignedOfficerId?: string;
+  crossCaseHitCount?: number;
+  freezeRequestCount?: number;
   leadInvestigatorId: string;
   leadInvestigatorName: string;
   createdAt: string;
@@ -75,6 +86,9 @@ export interface EvidenceItem {
   exifMetadata: Record<string, string>;
   ocrRawText: string;
   ocrConfidence: number;
+  ocrEngine?: string;
+  needsReview?: boolean;
+  phash?: string;
   boundingBoxes: BoundingBox[];
   processingStage: string;
   timestampAnomaly: boolean;
@@ -175,4 +189,55 @@ export interface ShortestPathResult {
   nodeIds: string[];
   edgeIds: string[];
   narrativeSteps: string[];
+}
+
+
+export interface FreezeRequest {
+  id: string;
+  caseId: string;
+  bankName?: string;
+  accountRef: string;
+  ifsc?: string;
+  utr?: string;
+  amountPaise: number;
+  packetHash: string;
+  status: string;
+  ackRef?: string;
+  requestedBy?: string;
+  createdAt: string;
+  sentAt?: string;
+}
+
+export interface StatusUpdate {
+  id: string;
+  caseId: string;
+  status: string;
+  note: string;
+  createdAt: string;
+}
+
+export interface TriageRow extends ForensicCaseSummary {
+  destination?: string;
+  minutesSinceIncident?: number | null;
+}
+
+export interface ActionCard {
+  case: ForensicCaseSummary;
+  destinations: {
+    type: string; value: string; label: string; bank?: string;
+    confidence: number; evidenceIds: string[]; seenInOtherComplaints: number;
+  }[];
+  utrs: string[];
+  ifscs: string[];
+  urgencyScore: number;
+  urgencyReasons: string[];
+  minutesSinceIncident?: number | null;
+  related: {
+    caseId: string; complaintNo: string; title: string; status: string;
+    amountLostPaise: number; sharedEntities: string[];
+  }[];
+  freezeRequests: FreezeRequest[];
+  recommendedActions: string[];
+  suggestedLegalSections: string[];
+  legalNote: string;
 }

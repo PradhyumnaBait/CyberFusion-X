@@ -72,10 +72,13 @@ public class CaseServlet extends HttpServlet {
         }
         String incidentType = ServletJsonHelper.getString(body, "incidentType", "UPI_WIRE_FRAUD");
         String victimName = ServletJsonHelper.getString(body, "victimName", "Corporate Victim");
-        double estimatedLoss = ServletJsonHelper.getDouble(body, "estimatedLossUsd", 0.0);
+        long amountLostPaise = ServletJsonHelper.getLong(body, "amountLostPaise", -1);
+        if (amountLostPaise < 0) {
+            amountLostPaise = Math.round(ServletJsonHelper.getDouble(body, "amountRupees", 0.0) * 100.0);
+        }
         String summary = ServletJsonHelper.getString(body, "summary", "");
 
-        ForensicCase created = store.createCase(title, incidentType, victimName, estimatedLoss, summary, creator);
+        ForensicCase created = store.createCase(title, incidentType, victimName, amountLostPaise, summary, creator);
         ServletJsonHelper.writeJson(resp, 201, store.getFullCaseOverview(created.id));
     }
 }

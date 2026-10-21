@@ -54,7 +54,7 @@ public class ReportServlet extends HttpServlet {
         List<EntityRelationship> relationships = store.getRelationshipsForCase(caseId);
         List<TimelineEvent> timeline = store.getTimelineForCase(caseId);
         List<ChainOfCustodyEntry> ledger = store.getAuditLedger(caseId);
-        RiskEvaluation riskEval = RiskScoringService.evaluateCaseRisk(evidence, entities, relationships, timeline);
+        RiskEvaluation riskEval = RiskScoringService.evaluateCaseRisk(evidence, entities, relationships, timeline, store.crossCaseCountsUnlocked(caseId));
 
         if ("/pdf".equals(pathInfo)) {
             byte[] pdfBytes = PdfReportGeneratorService.generateForensicPdf(
@@ -74,15 +74,7 @@ public class ReportServlet extends HttpServlet {
             return;
         }
 
-        if ("/stix".equals(pathInfo)) {
-            Map<String, Object> stix = PdfReportGeneratorService.generateStixBundle(fc, evidence, entities, relationships);
-            store.appendLedgerEntry(caseId, actorUsername, actorRole, "STIX_2_1_BUNDLE_EXPORTED",
-                    fc.caseNumber + "_STIX21.json", "Exported OASIS STIX 2.1 CTI bundle", req.getRemoteAddr());
-            resp.setHeader("Content-Disposition",
-                    "attachment; filename=\"" + fc.caseNumber + "_STIX_2_1_Bundle.json\"");
-            ServletJsonHelper.writeJson(resp, 200, stix);
-            return;
-        }
+        // STIX export removed in the two-portal redesign: no citizen/officer workflow used it.
 
         if ("/markdown".equals(pathInfo)) {
             String md = PdfReportGeneratorService.generateMarkdownReport(

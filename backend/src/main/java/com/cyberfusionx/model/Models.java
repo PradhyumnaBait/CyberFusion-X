@@ -62,19 +62,31 @@ public final class Models {
 
     public static class ForensicCase {
         public String id;
-        public String caseNumber;
+        public String caseNumber;   // Citizen-facing complaint no, e.g. CFX-MH-2026-000123
         public String title;
-        public String incidentType; // UPI_WIRE_FRAUD, BEC_WIRE_INTERCEPT, PHISHING_CAMPAIGN, ACCOUNT_TAKEOVER, CRYPTO_DRAIN
-        public String status;       // OPEN, ANALYZING, VERIFIED, CLOSED
+        public String incidentType; // UPI_PAYMENT_FRAUD, FAKE_JOB_INVESTMENT, PHISHING_LINK, ACCOUNT_HACKED, HARASSMENT_THREATS, OTHER
+        public String status;       // DRAFT, SUBMITTED, TRIAGED, FREEZE_SENT, INVESTIGATING, CLOSED, OPEN (officer-created)
         public String severity;     // CRITICAL, HIGH, MEDIUM, LOW
         public int riskScore;
+        public int urgencyScore;
         public String summary;
         public String victimName;
-        public double estimatedLossUsd;
+        /** Money lost, stored as paise (INR * 100). Never use double for money. */
+        public long amountLostPaise;
         public String leadInvestigatorId;
         public String leadInvestigatorName;
         public String createdAt;
         public String updatedAt;
+        // --- Citizen complaint fields (Phase: two-portal) ---
+        public String origin;              // CITIZEN, OFFICER
+        public String citizenContactMasked; // e.g. +91 98XXX XX210 (never store full phone in display fields)
+        public String district;            // Maharashtra district
+        public String stationId;
+        public String language;            // UI language used by citizen: en, hi, mr
+        public String incidentAt;          // When the incident/transaction happened (ISO-8601 UTC)
+        public String reportedAt;          // When the citizen submitted
+        public String draftTokenHash;      // SHA-256 of the citizen draft/track token (raw token never stored)
+        public String assignedOfficerId;
     }
 
     public static class BoundingBox {
@@ -118,8 +130,11 @@ public final class Models {
         public Map<String, String> exifMetadata = new LinkedHashMap<>();
         public String ocrRawText;
         public double ocrConfidence;
+        public String ocrEngine; // TESSERACT, FIXTURE_EMBEDDED_TEXT, PDF_TEXT, PLAIN_TEXT, NONE
+        public boolean needsReview; // true when text could not be read automatically (honest fallback, never invented)
+        public String phash; // perceptual aHash (16 hex chars) for near-duplicate image detection
         public List<BoundingBox> boundingBoxes = new ArrayList<>();
-        public String processingStage; // COMPLETED, OCR_EXTRACTING, AI_CORRELATING, FAILED
+        public String processingStage; // COMPLETED, NEEDS_REVIEW, FAILED
         public boolean timestampAnomaly;
         public String timestampAnomalyDetail;
         public String uploadedBy;
@@ -234,6 +249,40 @@ public final class Models {
         public String previousHash;
         public String entryHash;
         public String timestamp;
+    }
+
+    /** Citizen-visible status event (drives the complaint tracker). Only real recorded events appear. */
+    public static class StatusUpdate {
+        public String id;
+        public String caseId;
+        public String status;   // RECEIVED, UNDER_REVIEW, BANK_INTIMATED, INVESTIGATING, CLOSED
+        public String note;     // plain-language note for the citizen
+        public String createdAt;
+    }
+
+    /** Bank freeze intimation packet lifecycle (sent to a mock bank in demo mode). */
+    public static class FreezeRequest {
+        public String id;
+        public String caseId;
+        public String bankName;
+        public String accountRef;    // beneficiary UPI ID or account number
+        public String ifsc;
+        public String utr;
+        public long amountPaise;
+        public String packetHash;    // SHA-256 of the generated packet contents
+        public String status;        // DRAFT, SENT, ACKNOWLEDGED, REJECTED
+        public String ackRef;        // acknowledgement reference returned by (mock) bank
+        public String idempotencyKey;
+        public String requestedBy;
+        public String createdAt;
+        public String sentAt;
+    }
+
+    public static class PoliceStation {
+        public String id;
+        public String name;
+        public String district;
+        public String type; // CYBER_PS, MAHARASHTRA_CYBER_HQ
     }
 
     public static class ShortestPathResult {

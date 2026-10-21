@@ -50,7 +50,7 @@ public final class PdfReportGeneratorService {
         lines.add("Status / Severity : " + safe(forensicCase.status) + " / " + safe(forensicCase.severity));
         lines.add("Composite Risk    : " + forensicCase.riskScore + " / 100");
         lines.add("Primary Victim    : " + safe(forensicCase.victimName));
-        lines.add("Estimated Loss    : $" + String.format("%,.2f USD", forensicCase.estimatedLossUsd));
+        lines.add("Amount Reported   : " + formatInr(forensicCase.amountLostPaise));
         lines.add("Lead Investigator : " + safe(forensicCase.leadInvestigatorName));
         lines.add("Report Generated  : " + generatedAt);
         lines.add("Digital Signature : " + reportSignature);
@@ -152,7 +152,7 @@ public final class PdfReportGeneratorService {
         md.append("| **Incident Classification** | `").append(safe(forensicCase.incidentType)).append("` |\n");
         md.append("| **Severity / Risk Score** | **").append(safe(forensicCase.severity)).append("** (`").append(forensicCase.riskScore).append(" / 100`) |\n");
         md.append("| **Primary Victim** | ").append(safe(forensicCase.victimName)).append(" |\n");
-        md.append("| **Estimated Financial Exposure** | **$").append(String.format("%,.2f USD", forensicCase.estimatedLossUsd)).append("** |\n");
+        md.append("| **Amount Reported Lost** | **").append(formatInr(forensicCase.amountLostPaise)).append("** |\n");
         md.append("| **Lead Investigator** | ").append(safe(forensicCase.leadInvestigatorName)).append(" |\n");
         md.append("| **Generated Timestamp (UTC)** | `").append(generatedAt).append("` |\n");
         md.append("| **HMAC-SHA256 Report Signature** | `").append(sig).append("` |\n\n");
@@ -200,72 +200,125 @@ public final class PdfReportGeneratorService {
         return md.toString();
     }
 
-    public static Map<String, Object> generateStixBundle(
-            ForensicCase forensicCase,
-            List<EvidenceItem> evidenceList,
-            List<ExtractedEntity> entities,
-            List<EntityRelationship> relationships
-    ) {
-        Map<String, Object> bundle = new LinkedHashMap<>();
-        bundle.put("type", "bundle");
-        bundle.put("id", "bundle--" + UUID.randomUUID());
-        bundle.put("spec_version", "2.1");
-
-        List<Map<String, Object>> objects = new ArrayList<>();
-
-        Map<String, Object> reportObj = new LinkedHashMap<>();
-        reportObj.put("type", "report");
-        reportObj.put("spec_version", "2.1");
-        reportObj.put("id", "report--" + forensicCase.id);
-        reportObj.put("created", Instant.now().toString());
-        reportObj.put("name", forensicCase.caseNumber + ": " + forensicCase.title);
-        reportObj.put("description", forensicCase.summary);
-        reportObj.put("confidence", 95);
-        objects.add(reportObj);
-
-        for (ExtractedEntity en : entities) {
-            Map<String, Object> obj = new LinkedHashMap<>();
-            obj.put("type", "THREAT_ACTOR".equals(en.roleInIncident) ? "threat-actor" : "indicator");
-            obj.put("spec_version", "2.1");
-            obj.put("id", ("THREAT_ACTOR".equals(en.roleInIncident) ? "threat-actor--" : "indicator--") + en.id);
-            obj.put("name", en.displayLabel);
-            obj.put("entity_type", en.entityType);
-            obj.put("normalized_value", en.normalizedValue);
-            obj.put("pagerank_centrality", en.pagerankScore);
-            obj.put("risk_level", en.riskLevel);
-            objects.add(obj);
+    /** Citizen receipt: complaint summary + sealed evidence manifest + next steps. Plain language. */
+    public static byte[] generateCitizenReceiptPdf(ForensicCase fc, java.util.List<EvidenceItem> evidence,
+                                                     java.util.List<ExtractedEntity> entities, String caseSeal,
+                                                     java.util.List<String> nextSteps, java.util.List<String> safetyTips) {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        String sig = CryptographicHashService.signForensicCertificate(fc.caseNumber + "|" + caseSeal);
+        lines.add("=================================================================================");
+        lines.add("CYBERFUSION X - COMPLAINT RECEIPT (DEMO SYSTEM)");
+        lines.add("This is a receipt from the CyberFusion X demo. It is NOT an FIR and NOT an");
+        lines.add("NCRP acknowledgement. For the official process call 1930 / cybercrime.gov.in");
+        lines.add("=================================================================================");
+        lines.add("Complaint Number : " + safe(fc.caseNumber));
+        lines.add("Name             : " + safe(fc.victimName));
+        lines.add("Complaint Type   : " + safe(fc.incidentType).replace('_', ' '));
+        lines.add("Amount Reported  : " + formatInr(fc.amountLostPaise));
+        lines.add("Incident Time    : " + safe(fc.incidentAt));
+        lines.add("Submitted At     : " + safe(fc.reportedAt));
+        lines.add("District         : " + safe(fc.district));
+        lines.add("");
+        lines.add("WHAT YOU TOLD US");
+        lines.add("---------------------------------------------------------------------------------");
+        wrapText(safe(fc.summary), 78, lines);
+        lines.add("");
+        lines.add("DETAILS FOUND IN YOUR EVIDENCE");
+        lines.add("---------------------------------------------------------------------------------");
+        for (ExtractedEntity e : entities) {
+            lines.add("* " + safe(e.entityType).replace('_', ' ') + ": " + safe(e.displayLabel));
         }
-
-        for (EntityRelationship rel : relationships) {
-            Map<String, Object> relObj = new LinkedHashMap<>();
-            relObj.put("type", "relationship");
-            relObj.put("spec_version", "2.1");
-            relObj.put("id", "relationship--" + rel.id);
-            relObj.put("relationship_type", rel.relationshipType.toLowerCase().replace('_', '-'));
-            relObj.put("source_ref", "indicator--" + rel.sourceEntityId);
-            relObj.put("target_ref", "indicator--" + rel.targetEntityId);
-            relObj.put("confidence", (int) (rel.confidence * 100));
-            objects.add(relObj);
+        if (entities.isEmpty()) lines.add("(No details could be extracted automatically - an officer will read your files.)");
+        lines.add("");
+        lines.add("YOUR SEALED EVIDENCE (SHA-256 fingerprint of each file as received)");
+        lines.add("---------------------------------------------------------------------------------");
+        for (EvidenceItem ev : evidence) {
+            lines.add("* [" + safe(ev.evidenceCode) + "] " + safe(ev.originalFilename));
+            lines.add("  SHA-256: " + safe(ev.sha256Hash));
         }
-
-        for (EvidenceItem ev : evidenceList) {
-            Map<String, Object> artifact = new LinkedHashMap<>();
-            artifact.put("type", "artifact");
-            artifact.put("spec_version", "2.1");
-            artifact.put("id", "artifact--" + ev.id);
-            artifact.put("mime_type", ev.detectedMimeType);
-            artifact.put("hashes", Map.of("SHA-256", ev.sha256Hash, "BLAKE3", ev.blake3Hash));
-            artifact.put("integrity_status", ev.integrityStatus);
-            objects.add(artifact);
-        }
-
-        bundle.put("objects", objects);
-        return bundle;
+        lines.add("Case Seal (hash of all files): " + safe(caseSeal));
+        lines.add("You can re-check any file any time on the Verify My File page.");
+        lines.add("");
+        lines.add("WHAT HAPPENS NEXT");
+        lines.add("---------------------------------------------------------------------------------");
+        int n = 1;
+        for (String step : nextSteps) { wrapText(n++ + ". " + step, 78, lines); }
+        lines.add("");
+        lines.add("STAY SAFE");
+        lines.add("---------------------------------------------------------------------------------");
+        for (String tip : safetyTips) { wrapText("- " + tip, 78, lines); }
+        lines.add("=================================================================================");
+        return buildMultiPagePdfBinary(lines, fc.caseNumber, sig);
     }
 
-    /**
-     * Builds a valid multi-page PDF 1.7 binary file from formatted report lines.
-     */
+    /** Freeze intimation packet (demo layout modelled on bank nodal-officer communication). */
+    public static byte[] generateFreezePacketPdf(ForensicCase fc, com.cyberfusionx.model.Models.FreezeRequest fr,
+                                                   String officerName, String caseSeal) {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        lines.add("=================================================================================");
+        lines.add("REQUEST FOR HOLD / FREEZE OF DISPUTED FUNDS  [SIMULATION - DEMO PACKET]");
+        lines.add("CyberFusion X demo output. In production this is submitted via I4C / CFCFRMS");
+        lines.add("and the bank's nodal officer. This document alone does not freeze any account.");
+        lines.add("=================================================================================");
+        lines.add("Complaint Ref    : " + safe(fc.caseNumber));
+        lines.add("Packet SHA-256   : " + safe(fr.packetHash));
+        lines.add("Requested By     : " + safe(officerName) + " (" + safe(fr.requestedBy) + ")");
+        lines.add("Generated At     : " + safe(fr.createdAt));
+        lines.add("");
+        lines.add("DISPUTED TRANSACTION");
+        lines.add("---------------------------------------------------------------------------------");
+        lines.add("Beneficiary Ref  : " + safe(fr.accountRef));
+        lines.add("Bank / PSP       : " + safe(fr.bankName));
+        lines.add("IFSC             : " + safe(fr.ifsc));
+        lines.add("UTR / Ref No     : " + safe(fr.utr));
+        lines.add("Amount           : " + formatInr(fr.amountPaise));
+        lines.add("Incident Time    : " + safe(fc.incidentAt));
+        lines.add("Complainant      : " + safe(fc.victimName));
+        lines.add("Evidence Case Seal (SHA-256 of evidence hashes):");
+        lines.add("  " + safe(caseSeal));
+        lines.add("");
+        lines.add("Action requested: place a lien/hold on the disputed amount in the beneficiary");
+        lines.add("account and share lien confirmation with the investigating officer.");
+        lines.add("Acknowledgement (mock bank): " + safe(fr.ackRef) + "  Status: " + safe(fr.status));
+        lines.add("=================================================================================");
+        return buildMultiPagePdfBinary(lines, fc.caseNumber, fr.packetHash);
+    }
+
+    /** BSA 2023 Section 63 certificate DRAFT — Part A pre-filled; Part B left for the expert. */
+    public static byte[] generateBsa63DraftPdf(ForensicCase fc, java.util.List<EvidenceItem> evidence) {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        String sig = CryptographicHashService.signForensicCertificate("BSA63|" + fc.caseNumber);
+        lines.add("=================================================================================");
+        lines.add("DRAFT CERTIFICATE - BHARATIYA SAKSHYA ADHINIYAM 2023, SECTION 63(4)");
+        lines.add("DRAFT generated by CyberFusion X for review & signature. Not a signed certificate.");
+        lines.add("=================================================================================");
+        lines.add("PART A (to be signed by the person in charge of the device/activity)");
+        lines.add("---------------------------------------------------------------------------------");
+        lines.add("Complaint / Case Ref : " + safe(fc.caseNumber));
+        lines.add("The electronic records listed below were received and sealed as shown:");
+        lines.add("");
+        for (EvidenceItem ev : evidence) {
+            lines.add("* Record: " + safe(ev.originalFilename) + " [" + safe(ev.evidenceCode) + "]");
+            lines.add("  Produced/received at : " + safe(ev.uploadedAt) + " by " + safe(ev.uploadedBy));
+            lines.add("  Device/source detail : " + safe(ev.exifMetadata.getOrDefault("DeviceMake", "As per evidence manifest")));
+            lines.add("  Hash value (SHA-256) : " + safe(ev.sha256Hash));
+            lines.add("");
+        }
+        lines.add("Name & designation: ______________________   Signature: ______________  Date: ________");
+        lines.add("");
+        lines.add("PART B (to be signed by the expert)");
+        lines.add("---------------------------------------------------------------------------------");
+        lines.add("Expert name & qualifications: _________________________________________________");
+        lines.add("I examined the above records and their hash values and state that:");
+        lines.add("_________________________________________________________________________________");
+        lines.add("_________________________________________________________________________________");
+        lines.add("Signature: ______________  Date: ________  Seal (if any): ______________");
+        lines.add("=================================================================================");
+        lines.add("Note: Hash values prove the files are unchanged since they were hashed on");
+        lines.add("receipt. They do not by themselves prove the original screenshot was genuine.");
+        return buildMultiPagePdfBinary(lines, fc.caseNumber, sig);
+    }
+
     private static byte[] buildMultiPagePdfBinary(List<String> allLines, String caseNumber, String signature) {
         int linesPerPage = 50;
         List<List<String>> pages = new ArrayList<>();
@@ -400,6 +453,21 @@ public final class PdfReportGeneratorService {
             if (e.id.equals(id)) return e.displayLabel;
         }
         return id;
+    }
+
+    /** Rs. formatting with Indian digit grouping from paise. ASCII-safe for the PDF writer. */
+    public static String formatInr(long paise) {
+        long rupees = paise / 100;
+        long rem = Math.abs(paise % 100);
+        String digits = Long.toString(Math.abs(rupees));
+        StringBuilder grouped = new StringBuilder();
+        int len = digits.length();
+        for (int i = 0; i < len; i++) {
+            grouped.append(digits.charAt(i));
+            int remaining = len - i - 1;
+            if (remaining > 0 && (remaining == 3 || (remaining > 3 && (remaining - 3) % 2 == 0))) grouped.append(',');
+        }
+        return "Rs. " + (rupees < 0 ? "-" : "") + grouped + (rem > 0 ? String.format(".%02d", rem) : "");
     }
 
     private static String truncate(String s, int max) {

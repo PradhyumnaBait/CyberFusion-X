@@ -63,13 +63,20 @@ public final class ServletJsonHelper {
         return defaultVal;
     }
 
+    public static long getLong(Map<String, Object> body, String key, long defaultVal) {
+        Object val = body.get(key);
+        if (val instanceof Number n) return n.longValue();
+        if (val != null) { try { return Long.parseLong(String.valueOf(val).trim()); } catch (Exception ignored) {} }
+        return defaultVal;
+    }
+
     public static String getActorUsername(HttpServletRequest req) {
         Object u = req.getAttribute("actorUsername");
-        return u != null ? String.valueOf(u) : "arjun.verma";
+        return u != null ? String.valueOf(u) : "anonymous";
     }
 
     public static String getActorRole(HttpServletRequest req) {
         Object r = req.getAttribute("actorRole");
-        return r != null ? String.valueOf(r) : "LEAD_INVESTIGATOR";
+        return r != null ? String.valueOf(r) : "ANONYMOUS";
     }
 }

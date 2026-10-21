@@ -165,6 +165,63 @@ public class CyberFusionForensicTestSuite {
     }
 
     @Test
+    public void testIndianExtractionUtrIfscAndPhoneGuard() {
+        // A realistic pasted SMS as a citizen would provide it.
+        ForensicDataStore store = ForensicDataStore.getInstance();
+        String text = "Sender: +919820411892\nURGENT KYC expired. Pay Rs. 24,500 to apex.verify.settlement@okaxis\n"
+                + "UPI Ref No: 427188390214\nBeneficiary IFSC: UTIB0001842\nhttps://secure-kyc-verify.top/login";
+        var draft = store.createCitizenDraft("UPI_PAYMENT_FRAUD", "Pune", "en");
+        ForensicCase c = (ForensicCase) draft.get("case");
+        store.ingestEvidence(c.id, "test_paste.txt", "PASTED_TEXT",
+                text.getBytes(StandardCharsets.UTF_8), null, null, "citizen-portal");
+        List<ExtractedEntity> ents = store.getEntitiesForCase(c.id);
+        Assert.assertTrue("bare labelled 12-digit UTR extracted as TRANSACTION_ID",
+                ents.stream().anyMatch(e -> e.entityType.equals("TRANSACTION_ID") && e.normalizedValue.equals("UTR427188390214")));
+        Assert.assertTrue("IFSC extracted",
+                ents.stream().anyMatch(e -> e.entityType.equals("IFSC") && e.normalizedValue.equals("UTIB0001842")));
+        Assert.assertTrue("UPI extracted",
+                ents.stream().anyMatch(e -> e.entityType.equals("UPI_ID")));
+        Assert.assertFalse("UTR digits must NOT also be misread as a phone number",
+                ents.stream().anyMatch(e -> e.entityType.equals("PHONE") && e.normalizedValue.contains("427188390214")));
+        Assert.assertTrue("real sender phone extracted",
+                ents.stream().anyMatch(e -> e.entityType.equals("PHONE") && e.normalizedValue.equals("+919820411892")));
+
+        // Citizen token: only the hash is stored; the raw token verifies, a wrong one does not.
+        String token = (String) draft.get("token");
+        Assert.assertTrue(store.verifyCitizenToken(c.id, token));
+        Assert.assertFalse(store.verifyCitizenToken(c.id, "wrong-token"));
+
+        // Cross-case: this UPI ID is shared with the seeded citizen cases -> fraud-ring signal.
+        Map<String, Integer> cross = store.crossCaseCountsUnlocked(c.id);
+        Assert.assertTrue("shared UPI must show cross-case hits",
+                cross.getOrDefault("UPI_ID::apex.verify.settlement@okaxis", 0) >= 1);
+        Assert.assertFalse("related complaints must be discoverable", store.findRelatedCases(c.id).isEmpty());
+
+        // INR formatting with Indian digit grouping.
+        Assert.assertEquals("Rs. 24,500", PdfReportGeneratorService.formatInr(2450000L));
+        Assert.assertEquals("Rs. 1,84,500", PdfReportGeneratorService.formatInr(18450000L));
+    }
+
+    @Test
+    public void testFreezeRequestIsIdempotentAndCitizenOcrHonesty() {
+        ForensicDataStore store = ForensicDataStore.getInstance();
+        FreezeRequest f1 = store.createAndSendFreezeRequest("case-citizen-upi-03",
+                "apex.verify.settlement@okaxis", "Axis Bank", "UTIB0001842", "UTR427188390214", 2450000L, "arjun.verma");
+        FreezeRequest f2 = store.createAndSendFreezeRequest("case-citizen-upi-03",
+                "apex.verify.settlement@okaxis", "Axis Bank", "UTIB0001842", "UTR427188390214", 2450000L, "arjun.verma");
+        Assert.assertNotNull(f1);
+        Assert.assertEquals("double-send must return the same request (idempotency)", f1.id, f2.id);
+        Assert.assertEquals("ACKNOWLEDGED", f1.status);
+        Assert.assertTrue(f1.ackRef.startsWith("MOCKBANK-ACK-"));
+
+        // Honest OCR: an arbitrary binary "image" must never yield invented receipt text.
+        var result = com.cyberfusionx.forensics.OcrExtractionService.extractOcrAndRegions(
+                new byte[]{(byte) 0x89, 'P', 'N', 'G', 1, 2, 3, 4}, "image/png", "upi_receipt.png", null, null);
+        Assert.assertTrue("unreadable image must be flagged needsReview, not fabricated",
+                result.needsReview() && result.rawText().isBlank());
+    }
+
+    @Test
     public void testInvestigatorRegistrationAndCredentialVerification() {
         ForensicDataStore store = ForensicDataStore.getInstance();
         String uniqueUser = "inv.test." + System.currentTimeMillis();

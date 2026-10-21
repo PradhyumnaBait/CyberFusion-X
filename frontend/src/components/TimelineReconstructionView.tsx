@@ -342,8 +342,8 @@ export const TimelineReconstructionView: React.FC<
                       {activeCase?.victimName || 'Arjun Mehta'}
                     </div>
                     <div>
-                      • Total Quantified Exposure: $
-                      {(activeCase?.estimatedLossUsd || 14850).toLocaleString()}
+                      • Total Reported Loss: ₹
+                      {((activeCase?.amountLostPaise || 0) / 100).toLocaleString('en-IN')}
                     </div>
                     <div>
                       • Correlated Evidence Files: {evidenceList.length}{' '}

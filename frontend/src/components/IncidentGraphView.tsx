@@ -499,32 +499,8 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
           </label>
         </div>
 
-        {/* Right: Graph UI Mode Switcher (Knowledge Graph image-11 vs CyberX Relationship Map image-10) */}
-        <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200">
-            <button
-              onClick={() => setGraphMode('KNOWLEDGE_GRAPH')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
-                graphMode === 'KNOWLEDGE_GRAPH'
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5 text-blue-600" />
-              <span>Knowledge Graph (VISLABS)</span>
-            </button>
-            <button
-              onClick={() => setGraphMode('CYBERX_RELATIONSHIP')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
-                graphMode === 'CYBERX_RELATIONSHIP'
-                  ? 'bg-indigo-950 text-cyan-300 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Radio className="w-3.5 h-3.5 text-cyan-500" />
-              <span>CyberX Activity Map</span>
-            </button>
-          </div>
+        <div className="hidden sm:block text-xs font-bold text-slate-500">
+          Incident graph — who is connected to whom, and through what
         </div>
       </div>
 
@@ -654,7 +630,7 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                 <span>
                   {hasActiveShortestPath
                     ? `Shortest-Path Isolation Mode (${shortestPath?.hopCount} Hops)`
-                    : 'VISLABS Knowledge Graph Topology'}
+                    : 'Incident Graph'}
                 </span>
                 <span className="text-slate-400 font-mono">
                   ({filteredEntities.length} Nodes ·{' '}

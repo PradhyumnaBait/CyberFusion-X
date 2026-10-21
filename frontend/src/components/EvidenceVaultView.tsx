@@ -33,6 +33,7 @@ interface EvidenceVaultViewProps {
   onVerifyIntegrity: (evidenceId: string) => Promise<void>;
   onSimulateTamper: (evidenceId: string, tamper: boolean) => Promise<void>;
   userRole: string;
+  jwtToken?: string;
 }
 
 const PRESET_TEMPLATES = [
@@ -47,7 +48,7 @@ const PRESET_TEMPLATES = [
       'Operator: Vikram Singh (Mule L1)',
       'Beneficiary Wallet: TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE',
       'Secondary Wallet: 0x99B44123EC7ab88b098defB751B7401B5f6d1122',
-      'Amount Converted: $9,200.00 USDT',
+      'Amount Converted: Rs. 92,000 USDT',
       'Coordinator Phone: +919876509911',
       'Exit Node IP: 185.220.101.44',
     ].join('\n'),
@@ -88,7 +89,10 @@ export const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
   onQuickIngest,
   onVerifyIntegrity,
   onSimulateTamper,
+  userRole,
+  jwtToken = '',
 }) => {
+  void userRole;
   const [showBoundingBoxes, setShowBoundingBoxes] = useState<boolean>(true);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [showIngestDrawer, setShowIngestDrawer] = useState<boolean>(false);

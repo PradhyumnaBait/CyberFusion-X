@@ -48,7 +48,12 @@ public final class AiForensicExtractorService {
     private static final Pattern ISO_TIMESTAMP_PATTERN = Pattern.compile(
             "(202\\d-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z?)");
     private static final Pattern AMOUNT_PATTERN = Pattern.compile(
-            "((?:\\$|USD\\s*|INR\\s*|₹|EUR\\s*|€)\\d[\\d,]*(?:\\.\\d{2})?|\\d[\\d,]*(?:\\.\\d{2})?\\s*(?:USD|INR|USDT|BTC|EUR))");
+            "((?:\\$|USD\\s*|INR\\s*|Rs\\.?\\s*|₹|EUR\\s*|€)\\d[\\d,]*(?:\\.\\d{2})?|\\d[\\d,]*(?:\\.\\d{2})?\\s*(?:USD|INR|USDT|BTC|EUR))");
+    private static final Pattern IFSC_PATTERN = Pattern.compile(
+            "\\b([A-Z]{4}0[A-Z0-9]{6})\\b");
+    /** Bare 12-digit UPI/IMPS UTR, only when a reference label precedes it (avoids matching accounts/phones). */
+    private static final Pattern UTR_BARE_PATTERN = Pattern.compile(
+            "(?i)(?:UTR|Ref(?:erence)?(?:\\s*(?:No|ID)\\.?)?|Txn\\s*Ref)\\s*[:#\\-]?\\s*(\\d{12})\\b");
     private static final Pattern PERSON_LABEL_PATTERN = Pattern.compile(
             "(?:Victim|Sender|Beneficiary|Account Holder|Actor|From|To|Contact|Director|CFO):\\s*([A-Z][a-z]+\\s+[A-Z][a-z]+(?:\\s*\\([^)]+\\))?)");
 
@@ -99,9 +104,7 @@ public final class AiForensicExtractorService {
             Map<String, String> osint = new LinkedHashMap<>();
             osint.put("PaymentRail", "NPCI Unified Payments Interface (UPI)");
             osint.put("PSPHandle", upi.substring(upi.indexOf('@')));
-            osint.put("AccountType", upi.contains("verify") || upi.contains("mule") || upi.contains("fast")
-                    ? "Suspected Mule / Merchant Aggregator VPA" : "Individual VPA");
-            osint.put("VelocityFlag", "High-frequency inbound transfers detected");
+            osint.put("PSPBank", upiPspBank(upi.substring(upi.indexOf('@') + 1)));
             ExtractedEntity ent = resolveOrCreateEntity(
                     evidence, entityIndex, newlyFoundOrUpdated,
                     "UPI_ID", upi, upi, "MULE_ACCOUNT", 0.98, "HIGH", osint
@@ -128,14 +131,24 @@ public final class AiForensicExtractorService {
         while (phoneMatcher.find()) {
             String rawPhone = phoneMatcher.group(0).trim();
             int matchStart = phoneMatcher.start();
-            String prefixContext = matchStart >= 6 ? text.substring(matchStart - 6, matchStart).toUpperCase(Locale.ROOT) : "";
+            String prefixContext = text.substring(Math.max(0, matchStart - 18), matchStart).toUpperCase(Locale.ROOT);
             if (prefixContext.contains("IMPS") || prefixContext.contains("UTR")
                     || prefixContext.contains("TXN") || prefixContext.contains("SWFT")
-                    || prefixContext.contains("ACCT")) {
+                    || prefixContext.contains("ACCT") || prefixContext.contains("REF NO")
+                    || prefixContext.contains("REFERENCE") || prefixContext.contains("REF:")
+                    || prefixContext.contains("REF :") || prefixContext.contains("UPI REF")) {
                 continue;
             }
             String digits = rawPhone.replaceAll("[^0-9+]", "");
             if (digits.length() < 10 || digits.length() > 15) continue;
+            // A bare 12-digit number that is not +91-prefixed is far more likely a UTR than a phone.
+            String onlyDigits = digits.replace("+", "");
+            if (!rawPhone.startsWith("+") && onlyDigits.length() == 12 && !onlyDigits.startsWith("91")) continue;
+            // Indian mobiles (after +91 / 0) start with 6-9; reject other 10-digit sequences as phones.
+            String national = onlyDigits.startsWith("91") && onlyDigits.length() == 12 ? onlyDigits.substring(2)
+                    : onlyDigits.startsWith("0") && onlyDigits.length() == 11 ? onlyDigits.substring(1) : onlyDigits;
+            if (!rawPhone.startsWith("+44") && !rawPhone.startsWith("+1")
+                    && national.length() == 10 && "6789".indexOf(national.charAt(0)) < 0) continue;
             // Avoid matching bank account numbers, transaction IDs, or timestamps
             if (!rawPhone.startsWith("+") && digits.startsWith("2026")) continue;
             if (!rawPhone.startsWith("+") && (digits.startsWith("9180") || digits.startsWith("4090") || digits.startsWith("8839") || digits.startsWith("6274"))) continue;
@@ -156,10 +169,37 @@ public final class AiForensicExtractorService {
             Map<String, String> osint = new LinkedHashMap<>();
             osint.put("ClearingNetwork", txn.startsWith("UTR") || txn.startsWith("IMPS") ? "IMPS/UPI Instant Rail"
                     : txn.startsWith("SWFT") || txn.startsWith("WIRE") ? "SWIFT Cross-Border Wire" : "Electronic Funds Transfer");
-            osint.put("SettlementStatus", "SETTLED_IRREVOCABLE");
+            osint.put("SettlementStatus", "As stated in evidence (not independently verified)");
             ExtractedEntity ent = resolveOrCreateEntity(
                     evidence, entityIndex, newlyFoundOrUpdated,
                     "TRANSACTION_ID", txn, txn, "PAYMENT_RAIL", 0.99, "HIGH", osint
+            );
+            mentionedInThisEvidence.add(ent);
+        }
+
+        // 5b. Bare labelled 12-digit UTRs (common on real UPI receipts: "UPI Ref No: 4271...")
+        Matcher utrBareMatcher = UTR_BARE_PATTERN.matcher(text);
+        while (utrBareMatcher.find()) {
+            String utr = "UTR" + utrBareMatcher.group(1);
+            Map<String, String> osint = new LinkedHashMap<>();
+            osint.put("ClearingNetwork", "UPI/IMPS (12-digit UTR)");
+            ExtractedEntity ent = resolveOrCreateEntity(
+                    evidence, entityIndex, newlyFoundOrUpdated,
+                    "TRANSACTION_ID", utr, utr, "PAYMENT_RAIL", 0.97, "HIGH", osint
+            );
+            mentionedInThisEvidence.add(ent);
+        }
+
+        // 5c. IFSC codes (identifies the beneficiary bank branch for freeze intimation)
+        Matcher ifscMatcher = IFSC_PATTERN.matcher(text.toUpperCase(Locale.ROOT));
+        while (ifscMatcher.find()) {
+            String ifsc = ifscMatcher.group(1);
+            Map<String, String> osint = new LinkedHashMap<>();
+            osint.put("BankCode", ifsc.substring(0, 4));
+            osint.put("BranchCode", ifsc.substring(5));
+            ExtractedEntity ent = resolveOrCreateEntity(
+                    evidence, entityIndex, newlyFoundOrUpdated,
+                    "IFSC", ifsc, ifsc, "PAYMENT_RAIL", 0.99, "INFO", osint
             );
             mentionedInThisEvidence.add(ent);
         }
@@ -528,20 +568,37 @@ public final class AiForensicExtractorService {
         }
     }
 
+    /** Factual, locally-derived URL facts only. No invented domain age / blacklist verdicts. */
     public static Map<String, String> enrichUrlOsint(String url) {
         Map<String, String> info = new LinkedHashMap<>();
         String lower = url.toLowerCase(Locale.ROOT);
         boolean suspiciousTld = lower.contains(".top") || lower.contains(".xyz") || lower.contains(".click")
                 || lower.contains(".zip") || lower.contains(".online") || lower.contains(".icu");
-        boolean brandLure = lower.contains("hdfc") || lower.contains("kyc") || lower.contains("sbi")
-                || lower.contains("verify") || lower.contains("secure-") || lower.contains("auth") || lower.contains("swift");
+        boolean brandWords = lower.contains("hdfc") || lower.contains("kyc") || lower.contains("sbi")
+                || lower.contains("verify") || lower.contains("secure-");
+        boolean officialBank = lower.contains("hdfcbank.com") || lower.contains("sbi.co.in")
+                || lower.contains("onlinesbi.sbi") || lower.contains("icicibank.com") || lower.contains("axisbank.com");
 
         info.put("PunycodeASCII", url);
-        info.put("DomainAge", suspiciousTld || brandLure ? "2 days (Newly Registered Domain)" : "180 days");
-        info.put("TLS_Issuer", "Let's Encrypt E5 (DV Ephemeral Cert)");
-        info.put("ThreatVerdict", (suspiciousTld || brandLure) ? "CRITICAL" : "HIGH");
-        info.put("PhishingKitSignature", brandLure ? "Credential + OTP Reverse-Proxy Kit (Evilginx2 variant)" : "Suspicious Redirector");
+        info.put("HeuristicFlags", suspiciousTld ? "Low-cost TLD often abused for phishing"
+                : (brandWords && !officialBank) ? "Bank/KYC words on a non-official domain" : "None");
+        info.put("ExternalReputation", "Not checked (demo mode — enable a threat-intel API key to check)");
         return info;
+    }
+
+    private static String upiPspBank(String handle) {
+        return switch (handle.toLowerCase(Locale.ROOT)) {
+            case "okaxis" -> "Axis Bank (Google Pay)";
+            case "okhdfcbank" -> "HDFC Bank (Google Pay)";
+            case "okicici" -> "ICICI Bank (Google Pay)";
+            case "oksbi" -> "State Bank of India (Google Pay)";
+            case "ybl" -> "Yes Bank (PhonePe)";
+            case "ibl" -> "IDBI Bank (PhonePe)";
+            case "axl" -> "Axis Bank (PhonePe)";
+            case "paytm" -> "Paytm Payments Bank";
+            case "apl" -> "Amazon Pay (Axis)";
+            default -> "Unknown PSP (" + handle + ")";
+        };
     }
 
     public static Map<String, String> enrichPhoneOsint(String e164) {

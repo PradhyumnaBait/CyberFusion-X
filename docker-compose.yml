@@ -1,56 +1,23 @@
-version: "3.9"
-
+# CyberFusion X — single-service demo deployment.
+# Persistence is the file-backed store under ./data (cases + evidence vault).
+# PostgreSQL/MinIO were removed: they were provisioned but never used by the
+# code. V1-V3 SQL under backend/src/main/resources/db/migration documents the
+# optional Phase-2 relational move.
 services:
-  cyberfusion-postgres:
-    image: postgres:16-alpine
-    container_name: cyberfusion-postgres
-    environment:
-      POSTGRES_USER: forensics_admin
-      POSTGRES_PASSWORD: forensics_secret_password
-      POSTGRES_DB: cyberfusion_x
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./backend/src/main/resources/db/migration:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U forensics_admin -d cyberfusion_x"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  cyberfusion-minio:
-    image: minio/minio:latest
-    container_name: cyberfusion-minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: cyberfusion_vault_key
-      MINIO_ROOT_PASSWORD: cyberfusion_vault_secret_key
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_vault_data:/data
-
-  cyberfusion-backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: cyberfusion-backend
+  cyberfusion-x:
+    build: .
+    container_name: cyberfusion-x
     ports:
       - "8080:8080"
     environment:
       PORT: "8080"
       HOST: "0.0.0.0"
       DATA_DIR: "/app/data"
-      JWT_SECRET: "cyberfusion-x-enterprise-forensics-jwt-hmac-secret-2026"
+      # Set DEMO_MODE=false to disable the badged 1-click demo officer logins.
+      DEMO_MODE: "true"
+      JWT_SECRET: "change-me-in-any-real-deployment"
     volumes:
-      - app_vault_data:/app/data
-    depends_on:
-      - cyberfusion-postgres
-      - cyberfusion-minio
+      - app_data:/app/data
 
 volumes:
-  postgres_data:
-  minio_vault_data:
-  app_vault_data:
+  app_data:

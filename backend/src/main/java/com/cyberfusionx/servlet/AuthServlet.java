@@ -29,53 +29,42 @@ public class AuthServlet extends HttpServlet {
         String path = req.getPathInfo() != null ? req.getPathInfo() : "/me";
         ForensicDataStore store = ForensicDataStore.getInstance();
 
-        if ("/users".equals(path) || "/demo-users".equals(path)) {
+        if ("/users".equals(path)) {
+            // Officer-only (filter already required a JWT). Never includes credentials.
             List<Map<String, Object>> users = new ArrayList<>();
-            for (User u : store.listAllUsers()) {
-                Map<String, Object> safe = new LinkedHashMap<>(u.toSafeMap());
-                // Provide demo credentials metadata for the 3 seeded demo accounts
-                switch (u.username) {
-                    case "arjun.verma" -> {
-                        safe.put("demoPassword", "Forensics@2026");
-                        safe.put("permissionsSummary", "Full Command Access: Create cases, ingest/seal evidence, run 1-byte tamper sandbox, merge graph entities, and sign PDF/STIX dossiers.");
-                    }
-                    case "priya.nair" -> {
-                        safe.put("demoPassword", "Analyst@2026");
-                        safe.put("permissionsSummary", "Forensic Analyst Access: Upload evidence, inspect OCR bounding boxes, annotate timelines & knowledge graphs, and export reports.");
-                    }
-                    case "rohan.kulkarni" -> {
-                        safe.put("demoPassword", "Auditor@2026");
-                        safe.put("permissionsSummary", "Judicial Auditor Access: Read-only chain-of-custody inspection, live SHA-256/BLAKE3 re-verification, Merkle audit validation, and PDF export.");
-                    }
-                    default -> {
-                        safe.put("demoPassword", "");
-                        safe.put("permissionsSummary", "Registered Investigator Session");
-                    }
-                }
-                users.add(safe);
-            }
+            for (User u : store.listAllUsers()) users.add(new LinkedHashMap<>(u.toSafeMap()));
             ServletJsonHelper.writeJson(resp, 200, Map.of("users", users));
             return;
         }
 
-        if ("/totp-preview".equals(path)) {
-            User lead = store.findUserByUsername("arjun.verma");
-            String currentCode = lead != null && lead.mfaSecret != null
-                    ? CryptographicHashService.generateTotpCode(lead.mfaSecret, Instant.now().getEpochSecond())
-                    : "000000";
-            ServletJsonHelper.writeJson(resp, 200, Map.of(
-                    "username", "arjun.verma",
-                    "currentTotpCode", currentCode,
-                    "validWindowSeconds", 30
-            ));
+        if ("/demo-users".equals(path)) {
+            // Public ONLY in demo mode and WITHOUT passwords: names/roles for the badged 1-click demo login.
+            if (!com.cyberfusionx.filter.AuthenticationAndRbacFilter.isDemoMode()) {
+                ServletJsonHelper.writeError(resp, 403, "Demo mode is disabled.");
+                return;
+            }
+            List<Map<String, Object>> users = new ArrayList<>();
+            for (User u : store.listAllUsers()) {
+                Map<String, Object> safe = new LinkedHashMap<>(u.toSafeMap());
+                safe.put("permissionsSummary", switch (u.role) {
+                    case "LEAD_INVESTIGATOR" -> "Full access: triage, freeze packets, reports.";
+                    case "FORENSIC_ANALYST" -> "Evidence, timeline and graph analysis.";
+                    default -> "Read-only audit + integrity verification.";
+                });
+                users.add(safe);
+            }
+            ServletJsonHelper.writeJson(resp, 200, Map.of("users", users, "demoMode", true));
             return;
         }
+
+        // (Removed: the old public /totp-preview leaked a live MFA code to anyone.)
 
         // Default: /me
         String username = ServletJsonHelper.getActorUsername(req);
         User user = store.findUserByUsername(username);
         if (user == null) {
-            user = store.findUserByUsername("arjun.verma");
+            ServletJsonHelper.writeError(resp, 401, "Session user not found. Please login again.");
+            return;
         }
         String token = CryptographicHashService.issueJwt(
                 user.id, user.username, user.role, user.fullName, user.badgeNumber
@@ -83,6 +72,7 @@ public class AuthServlet extends HttpServlet {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("user", user.toSafeMap());
         result.put("token", token);
+        setSessionCookie(resp, token);
         ServletJsonHelper.writeJson(resp, 200, result);
     }
 
@@ -111,6 +101,7 @@ public class AuthServlet extends HttpServlet {
                 String token = CryptographicHashService.issueJwt(
                         created.id, created.username, created.role, created.fullName, created.badgeNumber
                 );
+                setSessionCookie(resp, token);
                 ServletJsonHelper.writeJson(resp, 201, Map.of(
                         "user", created.toSafeMap(),
                         "token", token
@@ -127,11 +118,17 @@ public class AuthServlet extends HttpServlet {
             store.appendLedgerEntry(null, actor, role,
                     "INVESTIGATOR_SIGNED_OUT", actor,
                     "Investigator signed out of forensic session", req.getRemoteAddr());
+            resp.setHeader("Set-Cookie", "cfx_token=; Path=/; Max-Age=0; SameSite=None; Secure; Partitioned");
             ServletJsonHelper.writeJson(resp, 200, Map.of("status", "SIGNED_OUT"));
             return;
         }
 
-        if ("/switch-role".equals(path)) {
+        if ("/demo-login".equals(path) || "/switch-role".equals(path)) {
+            // Badged demo access for college demonstrations ONLY. Disabled when DEMO_MODE=false.
+            if (!com.cyberfusionx.filter.AuthenticationAndRbacFilter.isDemoMode()) {
+                ServletJsonHelper.writeError(resp, 403, "Demo login is disabled. Use /login with your credentials.");
+                return;
+            }
             String targetUsername = ServletJsonHelper.getString(body, "username", "arjun.verma");
             User user = store.findUserByUsername(targetUsername);
             if (user == null) {
@@ -145,6 +142,7 @@ public class AuthServlet extends HttpServlet {
                     "INVESTIGATOR_SESSION_SWITCH", user.badgeNumber,
                     "Activated session as " + user.fullName + " [" + user.role + "]", req.getRemoteAddr());
 
+            setSessionCookie(resp, token);
             ServletJsonHelper.writeJson(resp, 200, Map.of(
                     "user", user.toSafeMap(),
                     "token", token
@@ -169,9 +167,21 @@ public class AuthServlet extends HttpServlet {
                 "INVESTIGATOR_AUTHENTICATED", user.badgeNumber,
                 "Authenticated via PBKDF2-HMAC-SHA256 & issued HS256 JWT", req.getRemoteAddr());
 
+        setSessionCookie(resp, token);
         ServletJsonHelper.writeJson(resp, 200, Map.of(
                 "user", user.toSafeMap(),
                 "token", token
         ));
+    }
+
+    /**
+     * Also store the JWT in a cookie. Some preview/hosting proxies strip the
+     * Authorization header; cookies survive. SameSite=None + Partitioned lets
+     * it work inside the cross-site preview iframe; the token is still a
+     * signed JWT verified on every request.
+     */
+    private static void setSessionCookie(HttpServletResponse resp, String token) {
+        resp.setHeader("Set-Cookie",
+                "cfx_token=" + token + "; Path=/; Max-Age=604800; SameSite=None; Secure; Partitioned");
     }
 }
