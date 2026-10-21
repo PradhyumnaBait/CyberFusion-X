@@ -9,12 +9,9 @@
     "preview": "vite preview --host 0.0.0.0 --port 5173"
   },
   "dependencies": {
-    "@react-three/fiber": "^8.17.10",
-    "@types/three": "^0.186.0",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "three": "^0.186.1"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
